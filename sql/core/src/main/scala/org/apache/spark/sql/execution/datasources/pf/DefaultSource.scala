@@ -102,13 +102,6 @@ class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.Defau
     val fileCatalog: FileCatalog =
       new HDFSFileCatalog(sqlContext, options, newFileStatus,None)
 
-    if(true )
-    {
-      println("Spark Mjoin Enabled")
-      val rdds = fileCatalog.allFiles().map(file => super.buildInternalScan(sqlContext,dataSchema,requiredColumns,filters,bucketSet,Seq(file),broadcastedConf,options))
-      new UnionRDD[InternalRow](sqlContext.sparkContext,rdds)
-    }
-    else
     super.buildInternalScan(sqlContext,dataSchema,requiredColumns,filters,bucketSet,fileCatalog.allFiles(),broadcastedConf,options)
 
   }
