@@ -34,6 +34,7 @@ import org.apache.spark.sql.catalyst.plans.logical
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.execution.datasources.pf.PFRelation.{CHUNK_NUM, CHUNK_RECORDS}
 import org.apache.spark.sql.execution.DataSourceScan.{INPUT_PATHS, PUSHED_FILTERS}
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.command.ExecutedCommand
@@ -594,8 +595,14 @@ private[sql] object DataSourceStrategy extends Strategy with Logging {
         case r: HadoopFsRelation => pairs += INPUT_PATHS -> r.location.paths.mkString(", ")
         case _ =>
       }
+      relation.relation match {
+        case HadoopFsRelation(_, pf : PFileCatalog,_,_,_,_,_) =>
+        pairs+= CHUNK_NUM -> pf.pfFileDesc.getChunksNum.toString
+        pairs+= CHUNK_RECORDS->  pf.pfFileDesc.chunkPFArray.map(chunk => chunk.num_records).mkString(",")
+        case _=> ;
+      }
 
-      pairs.toMap
+        pairs.toMap
     }
 
     if (projects.map(_.toAttribute) == projects &&

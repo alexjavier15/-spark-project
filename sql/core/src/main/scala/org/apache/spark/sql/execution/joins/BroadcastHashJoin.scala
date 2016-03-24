@@ -19,14 +19,16 @@ package org.apache.spark.sql.execution.joins
 
 import org.apache.spark.TaskContext
 import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{RDD, UnionPartition}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode, GenerateUnsafeProjection}
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.physical.{BroadcastDistribution, Distribution, Partitioning, UnspecifiedDistribution}
-import org.apache.spark.sql.execution.{BinaryNode, CodegenSupport, SparkPlan}
+import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.metric.SQLMetrics
+import org.apache.spark.sql.execution.{DataSourceScan , SparkPlan}
+import org.apache.spark.sql.sources.{HadoopFsRelation, PFileCatalog}
 import org.apache.spark.util.collection.CompactBuffer
 
 /**
@@ -67,7 +69,21 @@ case class BroadcastHashJoin(
     val numOutputRows = longMetric("numOutputRows")
 
     val broadcastRelation = buildPlan.executeBroadcast[HashedRelation]()
-    streamedPlan.execute().mapPartitions { streamedIter =>
+    val streamed = streamedPlan.execute()
+    left match {
+     case Filter(_, d @ DataSourceScan(_,rdd,h @ HadoopFsRelation(_, l : PFileCatalog,_,_,_,_,_),metadata)) =>
+        val partitions = rdd.partitions
+        partitions match{
+          case a @ Array[UnionParition] =>  false
+
+        }
+
+
+      case _ => streamed
+    }
+
+    streamed.mapPartitions { streamedIter =>
+
       val joinedRow = new JoinedRow()
       val hashTable = broadcastRelation.value
       TaskContext.get().taskMetrics().incPeakExecutionMemory(hashTable.getMemorySize)

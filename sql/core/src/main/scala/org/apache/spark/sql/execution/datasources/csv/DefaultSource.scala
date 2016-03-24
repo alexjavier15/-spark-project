@@ -23,13 +23,13 @@ import org.apache.hadoop.fs.FileStatus
 import org.apache.hadoop.io.{LongWritable, Text}
 import org.apache.hadoop.mapred.TextInputFormat
 import org.apache.hadoop.mapreduce.Job
-
 import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{RDD, UnionRDD}
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.UnsafeProjection
 import org.apache.spark.sql.execution.datasources.CompressionCodecs
+import org.apache.spark.sql.execution.datasources.pf.PFileRDD
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.util.SerializableConfiguration
@@ -128,8 +128,18 @@ class DefaultSource extends FileFormat with DataSourceRegister {
       sqlContext: SQLContext,
       options: CSVOptions,
       inputPaths: Seq[String]): RDD[String] = {
-    readText(sqlContext, options, inputPaths.mkString(","))
+    if(sqlContext.conf.mJoinEnabled == true && this.isInstanceOf[org.apache.spark.sql.execution.datasources.pf.DefaultSource] )
+      {
+      val rdds = inputPaths.map(path => readText(sqlContext,options,path))
+        new UnionRDD[String](sqlContext.sparkContext,rdds)
+      }
+    else
+     readText(sqlContext, options, inputPaths.mkString(","))
   }
+
+
+
+
 
   private def tokenRdd(
       sqlContext: SQLContext,

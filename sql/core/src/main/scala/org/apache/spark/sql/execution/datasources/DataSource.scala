@@ -22,13 +22,12 @@ import java.util.ServiceLoader
 import scala.collection.JavaConverters._
 import scala.language.{existentials, implicitConversions}
 import scala.util.{Failure, Success, Try}
-
 import org.apache.hadoop.fs.Path
-
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
+import org.apache.spark.sql.execution.datasources.pf.{PFRelation, PFileDesc}
 import org.apache.spark.sql.execution.streaming.{FileStreamSource, Sink, Source}
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types.{CalendarIntervalType, StructType}
@@ -76,6 +75,8 @@ case class DataSource(
     "org.apache.spark.sql.json.DefaultSource" -> classOf[json.DefaultSource].getCanonicalName,
     "org.apache.spark.sql.parquet" -> classOf[parquet.DefaultSource].getCanonicalName,
     "org.apache.spark.sql.parquet.DefaultSource" -> classOf[parquet.DefaultSource].getCanonicalName,
+    "org.apache.spark.sql.pf" -> classOf[pf.DefaultSource].getCanonicalName,
+    "org.apache.spark.sql.pf.DefaultSource" -> classOf[pf.DefaultSource].getCanonicalName,
     "com.databricks.spark.csv" -> classOf[csv.DefaultSource].getCanonicalName
   )
 
@@ -201,7 +202,18 @@ case class DataSource(
 
       case (format: FileFormat, _) =>
         val allPaths = caseInsensitiveOptions.get("path") ++ paths
-        val globbedPaths = allPaths.flatMap { path =>
+
+        val  (resolvedPaths, schema, pfDesc ) = format match {
+
+          case (pf : pf.DefaultSource) =>
+            val pfDesc =PFRelation.readPFileInfo(allPaths.head)
+            (pfDesc.paths,pfDesc.structType, Some(pfDesc))
+          case _ => (allPaths,userSpecifiedSchema, None)
+        }
+
+
+
+        val globbedPaths = resolvedPaths.flatMap { path =>
           val hdfsPath = new Path(path)
           val fs = hdfsPath.getFileSystem(sqlContext.sparkContext.hadoopConfiguration)
           val qualified = hdfsPath.makeQualified(fs.getUri, fs.getWorkingDirectory)
@@ -210,19 +222,24 @@ case class DataSource(
 
         // If they gave a schema, then we try and figure out the types of the partition columns
         // from that schema.
-        val partitionSchema = userSpecifiedSchema.map { schema =>
-          StructType(
-            partitionColumns.map { c =>
-              // TODO: Case sensitivity.
-              schema
+        val partitionSchema =
+          schema.map { schema =>
+            StructType(
+              partitionColumns.map { c =>
+                // TODO: Case sensitivity.
+                schema
                   .find(_.name.toLowerCase() == c.toLowerCase())
                   .getOrElse(throw new AnalysisException(s"Invalid partition column '$c'"))
-            })
-        }
+              })
+          }
 
         val fileCatalog: FileCatalog =
-          new HDFSFileCatalog(sqlContext, options, globbedPaths, partitionSchema)
-        val dataSchema = userSpecifiedSchema.orElse {
+          format match {
+
+            case (pf : pf.DefaultSource) => new PFileCatalog(sqlContext, options,globbedPaths, partitionSchema,pfDesc.get)
+            case _ => new HDFSFileCatalog(sqlContext, options, globbedPaths, partitionSchema)
+          }
+        val dataSchema = schema.orElse {
           format.inferSchema(
             sqlContext,
             caseInsensitiveOptions,

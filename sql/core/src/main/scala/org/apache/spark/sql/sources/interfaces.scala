@@ -19,22 +19,21 @@ package org.apache.spark.sql.sources
 
 import scala.collection.mutable
 import scala.util.Try
-
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileStatus, FileSystem, Path}
 import org.apache.hadoop.mapred.{FileInputFormat, JobConf}
 import org.apache.hadoop.mapreduce.{Job, TaskAttemptContext}
-
 import org.apache.spark.SparkContext
 import org.apache.spark.annotation.{DeveloperApi, Experimental}
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
-import org.apache.spark.sql.catalyst.{expressions, CatalystTypeConverters, InternalRow}
+import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow, expressions}
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.execution.FileRelation
 import org.apache.spark.sql.execution.datasources._
+import org.apache.spark.sql.execution.datasources.pf.{PFRelation, PFileDesc}
 import org.apache.spark.sql.execution.streaming.{Sink, Source}
 import org.apache.spark.sql.types.{StringType, StructType}
 import org.apache.spark.util.SerializableConfiguration
@@ -705,6 +704,19 @@ class HDFSFileCatalog(
   }
 
   override def hashCode(): Int = paths.toSet.hashCode()
+}
+
+class PFileCatalog(
+                    sqlContext: SQLContext,
+                    parameters: Map[String, String],
+                    paths: Seq[Path],
+                    partitionSchema: Option[StructType],
+                    val pfFileDesc : PFileDesc)
+  extends HDFSFileCatalog(sqlContext,parameters, paths,partitionSchema ){
+
+
+
+
 }
 
 /**

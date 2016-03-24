@@ -499,7 +499,7 @@ object SQLConf {
     doc = "This flag should be set to true to enable support for SQL2011 reserved keywords.")
 
   val WHOLESTAGE_CODEGEN_ENABLED = booleanConf("spark.sql.codegen.wholeStage",
-    defaultValue = Some(true),
+    defaultValue = Some(false),
     doc = "When true, the whole stage (of multiple operators) will be compiled into single java" +
       " method",
     isPublic = false)
@@ -512,6 +512,12 @@ object SQLConf {
   val EXCHANGE_REUSE_ENABLED = booleanConf("spark.sql.exchange.reuse",
     defaultValue = Some(true),
     doc = "When true, the planner will try to find out duplicated exchanges and re-use them",
+    isPublic = false)
+
+  val MJOIN_ENABLED = booleanConf("spark.sql.mjoin",
+    defaultValue = Some(false),
+    doc = "When true, the mjoin logic is used instead of BroadcastHashJoin" +
+      " plan",
     isPublic = false)
 
   object Deprecated {
@@ -633,6 +639,9 @@ class SQLConf extends Serializable with CatalystConf with ParserConf with Loggin
   def supportQuotedId: Boolean = getConf(PARSER_SUPPORT_QUOTEDID)
 
   def supportSQL11ReservedKeywords: Boolean = getConf(PARSER_SUPPORT_SQL11_RESERVED_KEYWORDS)
+
+  def mJoinEnabled: Boolean = getConf(MJOIN_ENABLED)
+
 
   /** ********************** SQLConf functionality methods ************ */
 

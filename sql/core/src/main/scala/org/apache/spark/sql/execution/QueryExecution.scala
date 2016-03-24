@@ -23,12 +23,12 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReturnAnswer}
 
 /**
- * The primary workflow for executing relational queries using Spark.  Designed to allow easy
- * access to the intermediate phases of query execution for developers.
- *
- * While this is not a public class, we should avoid changing the function names for the sake of
- * changing them, because a lot of developers use the feature for debugging.
- */
+  * The primary workflow for executing relational queries using Spark.  Designed to allow easy
+  * access to the intermediate phases of query execution for developers.
+  *
+  * While this is not a public class, we should avoid changing the function names for the sake of
+  * changing them, because a lot of developers use the feature for debugging.
+  */
 class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
 
   def assertAnalyzed(): Unit = try sqlContext.sessionState.analyzer.checkAnalysis(analyzed) catch {
@@ -39,48 +39,65 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
   }
 
   lazy val analyzed: LogicalPlan = sqlContext.sessionState.analyzer.execute(logical)
-
   lazy val withCachedData: LogicalPlan = {
     assertAnalyzed()
     sqlContext.cacheManager.useCachedData(analyzed)
   }
+  lazy val joinAnalyzer = new JoinAnalyzer(withCachedData,sqlContext)
+  lazy val mJoinPlan : Option[LogicalPlan] = {
+    if(sqlContext.conf.mJoinEnabled == true )
+      joinAnalyzer.mJoinLogical
+    else
+      None
 
-  lazy val optimizedPlan: LogicalPlan = sqlContext.sessionState.optimizer.execute(withCachedData)
-
-  lazy val sparkPlan: SparkPlan = {
-    SQLContext.setActive(sqlContext)
-    sqlContext.sessionState.planner.plan(ReturnAnswer(optimizedPlan)).next()
   }
 
-  // executedPlan should not be used to initialize any SparkPlan. It should be
-  // only used for execution.
-  lazy val executedPlan: SparkPlan = sqlContext.sessionState.prepareForExecution.execute(sparkPlan)
+  lazy val optimizedPlan: LogicalPlan =
+    sqlContext.sessionState.optimizer.execute(
+      mJoinPlan.getOrElse(
+        withCachedData)
+    )
 
-  /** Internal version of the RDD. Avoids copies and has no schema */
-  lazy val toRdd: RDD[InternalRow] = executedPlan.execute()
 
-  protected def stringOrError[A](f: => A): String =
-    try f.toString catch { case e: Throwable => e.toString }
 
-  def simpleString: String = {
-    s"""== Physical Plan ==
-       |${stringOrError(executedPlan)}
+
+    lazy val sparkPlan: SparkPlan = {
+      SQLContext.setActive(sqlContext)
+      sqlContext.sessionState.planner.plan(ReturnAnswer(optimizedPlan)).next()
+    }
+
+    // executedPlan should not be used to initialize any SparkPlan. It should be
+    // only used for execution.
+    lazy val executedPlan: SparkPlan = sqlContext.sessionState.prepareForExecution.execute(sparkPlan)
+
+    /** Internal version of the RDD. Avoids copies and has no schema */
+    lazy val toRdd: RDD[InternalRow] = executedPlan.execute()
+
+    protected def stringOrError[A](f: => A): String =
+    try f.toString catch {
+      case e: Throwable => e.toString
+    }
+
+    def simpleString: String = {
+      s"""== Physical Plan ==
+          |${stringOrError(executedPlan)}
       """.stripMargin.trim
-  }
+    }
 
-  override def toString: String = {
-    def output =
-      analyzed.output.map(o => s"${o.name}: ${o.dataType.simpleString}").mkString(", ")
+    override def toString: String =
+    {
+      def output =
+        analyzed.output.map(o => s"${o.name}: ${o.dataType.simpleString}").mkString(", ")
 
-    s"""== Parsed Logical Plan ==
-       |${stringOrError(logical)}
-       |== Analyzed Logical Plan ==
-       |${stringOrError(output)}
-       |${stringOrError(analyzed)}
-       |== Optimized Logical Plan ==
-       |${stringOrError(optimizedPlan)}
-       |== Physical Plan ==
-       |${stringOrError(executedPlan)}
+      s"""== Parsed Logical Plan ==
+          |${stringOrError(logical)}
+          |== Analyzed Logical Plan ==
+          |${stringOrError(output)}
+          |${stringOrError(analyzed)}
+          |== Optimized Logical Plan ==
+          |${stringOrError(optimizedPlan)}
+          |== Physical Plan ==
+          |${(executedPlan).toString}
     """.stripMargin.trim
+    }
   }
-}

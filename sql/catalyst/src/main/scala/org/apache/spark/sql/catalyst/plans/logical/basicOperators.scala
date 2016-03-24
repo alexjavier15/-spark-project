@@ -687,3 +687,13 @@ case object OneRowRelation extends LeafNode {
    */
   override def statistics: Statistics = Statistics(sizeInBytes = 1)
 }
+
+case class MJoin(child : LogicalPlan ,
+                 leaves : Seq[LogicalPlan] ,
+                 others: Option[Seq[LogicalPlan] ]) extends UnaryNode{
+
+
+  override def output: Seq[Attribute] = child.output
+
+  override def children: Seq[LogicalPlan] = others.getOrElse(Seq(child))
+}

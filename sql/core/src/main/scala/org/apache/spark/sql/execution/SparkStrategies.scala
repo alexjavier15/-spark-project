@@ -463,4 +463,15 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
       case _ => Nil
     }
   }
+
+  object MJoin extends Strategy {
+    def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
+      case logical.MJoin(child, baseRelations, subplans) =>
+        joins.BroadcastMJoin(
+          planLater(child),
+          baseRelations.map(planLater(_)),
+          Some(subplans.getOrElse(Seq()).map(planLater(_)))):: Nil
+      case _ => Nil
+    }
+  }
 }

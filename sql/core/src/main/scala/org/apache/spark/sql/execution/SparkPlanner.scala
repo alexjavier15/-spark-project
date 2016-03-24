@@ -44,7 +44,7 @@ class SparkPlanner(
       BasicOperators ::
       BroadcastNestedLoop ::
       CartesianProduct ::
-      DefaultJoin :: Nil)
+      DefaultJoin :: MJoin::Nil)
 
   /**
    * Used to build table scan operators where complex projection and filtering are done using

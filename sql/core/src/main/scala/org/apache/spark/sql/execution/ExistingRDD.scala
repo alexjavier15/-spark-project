@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.execution
 
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{RDD, UnionPartition}
 import org.apache.spark.sql.{AnalysisException, Row, SQLContext}
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
@@ -28,7 +28,7 @@ import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, Partition
 import org.apache.spark.sql.execution.datasources.parquet.{DefaultSource => ParquetSource}
 import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.sources.{BaseRelation, HadoopFsRelation}
+import org.apache.spark.sql.sources.{BaseRelation, HadoopFsRelation, PFileCatalog}
 import org.apache.spark.sql.types.DataType
 
 object RDDConversions {
@@ -171,7 +171,8 @@ private[sql] case class DataSourceScan(
 
   protected override def doExecute(): RDD[InternalRow] = {
     val unsafeRow = if (outputUnsafeRows) {
-      rdd
+       rdd
+
     } else {
       rdd.mapPartitionsInternal { iter =>
         val proj = UnsafeProjection.create(schema)
