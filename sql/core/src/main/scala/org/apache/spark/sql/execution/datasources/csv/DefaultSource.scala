@@ -128,12 +128,6 @@ class DefaultSource extends FileFormat with DataSourceRegister {
       sqlContext: SQLContext,
       options: CSVOptions,
       inputPaths: Seq[String]): RDD[String] = {
-    if(sqlContext.conf.mJoinEnabled == true && this.isInstanceOf[org.apache.spark.sql.execution.datasources.pf.DefaultSource] )
-      {
-      val rdds = inputPaths.map(path => readText(sqlContext,options,path))
-        new UnionRDD[String](sqlContext.sparkContext,rdds)
-      }
-    else
      readText(sqlContext, options, inputPaths.mkString(","))
   }
 

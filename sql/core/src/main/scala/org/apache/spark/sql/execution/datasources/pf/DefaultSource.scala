@@ -24,15 +24,14 @@ import org.apache.hadoop.fs.{FileStatus, Path}
 import org.apache.hadoop.mapreduce.Job
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.deploy.SparkHadoopUtil
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{RDD, UnionRDD}
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.execution.datasources.pf.PFRelation.{executeCommand,NEXT_CHUNK}
+import org.apache.spark.sql.execution.datasources.pf.PFRelation.{NEXT_CHUNK, executeCommand}
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.util.SerializableConfiguration
 import org.apache.spark.util.collection.BitSet
-
 
 import scala.io.BufferedSource
 
@@ -103,9 +102,15 @@ class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.Defau
     val fileCatalog: FileCatalog =
       new HDFSFileCatalog(sqlContext, options, newFileStatus,None)
 
-    val rdd =super.buildInternalScan(sqlContext,dataSchema,requiredColumns,filters,bucketSet,fileCatalog.allFiles(),broadcastedConf,options)
-   // rdd.cache()
-    rdd
+    if(true )
+    {
+      println("Spark Mjoin Enabled")
+      val rdds = fileCatalog.allFiles().map(file => super.buildInternalScan(sqlContext,dataSchema,requiredColumns,filters,bucketSet,Seq(file),broadcastedConf,options))
+      new UnionRDD[InternalRow](sqlContext.sparkContext,rdds)
+    }
+    else
+    super.buildInternalScan(sqlContext,dataSchema,requiredColumns,filters,bucketSet,fileCatalog.allFiles(),broadcastedConf,options)
+
   }
 
 
