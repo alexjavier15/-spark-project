@@ -7,7 +7,7 @@ import org.apache.spark.SparkContext
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.execution.datasources.BucketSpec
-import org.apache.spark.sql.sources.{FileCatalog, FileFormat, HadoopFsRelation}
+import org.apache.spark.sql.sources.{HadoopFsRelation, PFileCatalog}
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.json4s.DefaultFormats
 import org.json4s.jackson.JsonMethods._
@@ -19,20 +19,32 @@ import scala.io.Source._
   * Created by alex on 18.03.16.
   */
 
-class PFRelation(sqlContext: SQLContext,
-                 location: FileCatalog,
-                 partitionSchema: StructType,
-                 dataSchema: StructType,
-                 bucketSpec: Option[BucketSpec],
-                 fileFormat: FileFormat,
-                 options: Map[String, String]) extends
-  HadoopFsRelation(sqlContext: SQLContext,
-    location: FileCatalog,
-    partitionSchema: StructType,
-    dataSchema: StructType,
-    bucketSpec: Option[BucketSpec],
-    fileFormat: FileFormat,
-    options: Map[String, String]) {
+class HadoopPfRelation(override val sqlContext: SQLContext,
+                            pFLocation: PFileCatalog,
+                            partitionSchema: StructType,
+                            dataSchema: StructType,
+                            bucketSpec: Option[BucketSpec],
+                       override val fileFormat: DefaultSource,
+                            options: Map[String, String],
+                            val pFileDesc : PFileDesc,
+                            parent : HadoopPfRelation = null) extends
+  HadoopFsRelation(sqlContext,
+    pFLocation,
+    partitionSchema,
+    dataSchema,
+    bucketSpec,
+    fileFormat,
+    options) {
+
+  def hasParent : Boolean = parent!=null
+
+  def isChild(relation : HadoopPfRelation): Boolean = hasParent && parent == relation
+  def  splitHadoopPfRelation(): Seq[HadoopPfRelation] = {
+
+     pFLocation.splitPFileCatalog().map(fc =>
+       new HadoopPfRelation(sqlContext ,fc,partitionSchema,dataSchema,bucketSpec,fileFormat,options,pFileDesc, this))
+
+  }
 
 
   /*val fileDesc = PFRelation.readPFileInfo(location.paths.head.getName)
@@ -45,7 +57,7 @@ class PFRelation(sqlContext: SQLContext,
     case None => fileDesc.strucType
   }
 */
-
+  override def toString: String = { super.toString + ", " + pFLocation.toString }
 }
 
 protected[sql] object PFRelation extends Logging {

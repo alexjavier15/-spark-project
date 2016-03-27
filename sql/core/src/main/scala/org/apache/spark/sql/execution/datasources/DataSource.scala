@@ -27,7 +27,7 @@ import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
-import org.apache.spark.sql.execution.datasources.pf.{PFRelation, PFileDesc}
+import org.apache.spark.sql.execution.datasources.pf.{DefaultSource, HadoopPfRelation, PFRelation, PFileDesc}
 import org.apache.spark.sql.execution.streaming.{FileStreamSource, Sink, Source}
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types.{CalendarIntervalType, StructType}
@@ -251,14 +251,31 @@ case class DataSource(
         }
 
 
-        HadoopFsRelation(
-          sqlContext,
-          fileCatalog,
-          partitionSchema = fileCatalog.partitionSpec().partitionColumns,
-          dataSchema = dataSchema.asNullable,
-          bucketSpec = bucketSpec,
-          format,
-          options)
+        fileCatalog match {
+          case  fc : PFileCatalog =>
+            new HadoopPfRelation(
+              sqlContext,
+              fc,
+              partitionSchema = fileCatalog.partitionSpec().partitionColumns,
+              dataSchema = dataSchema.asNullable,
+              bucketSpec = bucketSpec,
+              format.asInstanceOf[DefaultSource],
+              options,
+              pfDesc.get)
+
+          case  _ =>
+            HadoopFsRelation(
+              sqlContext,
+              fileCatalog,
+              partitionSchema = fileCatalog.partitionSpec().partitionColumns,
+              dataSchema = dataSchema.asNullable,
+              bucketSpec = bucketSpec,
+              format,
+              options)
+
+
+        }
+
 
       case _ =>
         throw new AnalysisException(

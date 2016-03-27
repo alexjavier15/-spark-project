@@ -147,23 +147,38 @@ private def chunkHasSubplans(relIdx : Int, chunkIdx : Int) : Boolean = {
  }
 
 
-/*  private [this] def getNumOfBuckects(baseRelation : SparkPlan) : Int = {
+  /**
+    * Overridden by concrete implementations of SparkPlan. It is guaranteed to run before any
+    * `execute` of SparkPlan. This is helpful if we want to set up some state before executing the
+    * query, e.g., `BroadcastHashJoin` uses it to broadcast asynchronously.
+    *
+    * Note: the prepare method has already walked down the tree, so the implementation doesn't need
+    * to call children's prepare methods.
+    */
+  override protected def doPrepare(): Unit = {
 
-    baseRelation match {
-
-      case h : PFRelation =>
-
-    }
 
 
 
-  }*/
+  }
+
+  /*  private [this] def getNumOfBuckects(baseRelation : SparkPlan) : Int = {
+
+      baseRelation match {
+
+        case h : PFRelation =>
+
+      }
+
+
+
+    }*/
   override protected def doExecute(): RDD[InternalRow] = {
   if(key != -1){
     sqlContext.sparkContext.setLocalProperty("chunksFor"+key,"1")
     println("setting chunks for : " + key)
   }
-  child.execute()
+    child.execute()
 }
 
   override def output: Seq[Attribute] = child.output

@@ -18,7 +18,6 @@
 package org.apache.spark.sql.execution.datasources
 
 import scala.collection.mutable.ArrayBuffer
-
 import org.apache.spark.TaskContext
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
@@ -38,7 +37,8 @@ import org.apache.spark.sql.execution.datasources.pf.PFRelation.{CHUNK_NUM, CHUN
 import org.apache.spark.sql.execution.DataSourceScan.{INPUT_PATHS, PUSHED_FILTERS}
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.command.ExecutedCommand
-import org.apache.spark.sql.execution.vectorized.{ColumnarBatch, ColumnVectorUtils}
+import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
+import org.apache.spark.sql.execution.vectorized.{ColumnVectorUtils, ColumnarBatch}
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
@@ -174,6 +174,28 @@ private[sql] object DataSourceStrategy extends Strategy with Logging {
     // a lot of duplication and produces overly complicated RDDs.
 
     // Scanning non-partitioned HadoopFsRelation
+
+    case PhysicalOperation(projects, filters, l @ LogicalRelation(t: HadoopPfRelation, _, _)) =>
+      val sharedHadoopConf = SparkHadoopUtil.get.conf
+      val confBroadcast =
+        t.sqlContext.sparkContext.broadcast(new SerializableConfiguration(sharedHadoopConf))
+
+      // TO-DO : eliminate t parameters
+      pruneFilterProject(
+        l,
+        projects,
+        filters,
+        (a, f) =>
+          t.fileFormat.buildInternalScan(
+            t.sqlContext,
+            t.dataSchema,
+            a.map(_.name).toArray,
+            f,
+            None,
+            t.location.allFiles(),
+            confBroadcast,
+            t.options,t)) :: Nil
+
     case PhysicalOperation(projects, filters, l @ LogicalRelation(t: HadoopFsRelation, _, _)) =>
       // See buildPartitionedTableScan for the reason that we need to create a shard
       // broadcast HadoopConf.

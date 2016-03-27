@@ -1,4 +1,5 @@
 /*
+/*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
@@ -19,10 +20,39 @@
 package org.apache.spark.sql.execution.datasources.pf
 
 import org.apache.hadoop.fs.FileStatus
-import org.apache.spark.{Partition, SparkContext, TaskContext}
+import org.apache.hadoop.mapred.{FileSplit, InputSplit}
+import org.apache.spark.{Partition, SerializableWritable, SparkContext, TaskContext}
 import org.apache.spark.rdd.{RDD, UnionRDD}
 
+import scala.collection.immutable.Map
 import scala.reflect.ClassTag
+
+private[sql] class HadoopPartition(rddId: Int, idx: Int, s: InputSplit)
+  extends Partition {
+
+  val inputSplit = new SerializableWritable[InputSplit](s)
+
+  override def hashCode(): Int = 41 * (41 + rddId) + idx
+
+  override val index: Int = idx
+
+  /**
+    * Get any environment variables that should be added to the users environment when running pipes
+    * @return a Map with the environment variables and corresponding values, it could be empty
+    */
+  def getPipeEnvVars(): Map[String, String] = {
+    val envVars: Map[String, String] = if (inputSplit.value.isInstanceOf[FileSplit]) {
+      val is: FileSplit = inputSplit.value.asInstanceOf[FileSplit]
+      // map_input_file is deprecated in favor of mapreduce_map_input_file but set both
+      // since its not removed yet
+      Map("map_input_file" -> is.getPath().toString(),
+        "mapreduce_map_input_file" -> is.getPath().toString())
+    } else {
+      Map()
+    }
+    envVars
+  }
+}
 
 /**
   * Created by alex on 24.03.16.
@@ -37,3 +67,4 @@ class PFileRDD[T: ClassTag](sc: SparkContext,
 
 
 }
+*/

@@ -715,8 +715,13 @@ class PFileCatalog(
   extends HDFSFileCatalog(sqlContext,parameters, paths,partitionSchema ){
 
 
+  def splitPFileCatalog() : Seq[PFileCatalog] = {
 
+    paths.map(path => new PFileCatalog(sqlContext , parameters,Seq(path),partitionSchema,pfFileDesc))
 
+  }
+
+  override def toString: String = { paths.mkString(",")}
 }
 
 /**

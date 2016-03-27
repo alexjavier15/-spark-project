@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.execution
 
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{RDD, UnionRDD}
 import org.apache.spark.sql.{AnalysisException, SQLContext}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReturnAnswer}
@@ -71,6 +71,7 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
     lazy val executedPlan: SparkPlan = sqlContext.sessionState.prepareForExecution.execute(sparkPlan)
 
     /** Internal version of the RDD. Avoids copies and has no schema */
+     // val res = new UnionRDD[InternalRow](sqlContext.sparkContext, Seq(executedPlan.execute(), executedPlan.execute()))
     lazy val toRdd: RDD[InternalRow] = executedPlan.execute()
 
     protected def stringOrError[A](f: => A): String =
