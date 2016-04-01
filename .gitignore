@@ -19,6 +19,7 @@ out/
 .DS_Store
 build/apache-maven*
 build/zinc*
+bin/*
 build/scala*
 conf/java-opts
 conf/*.sh

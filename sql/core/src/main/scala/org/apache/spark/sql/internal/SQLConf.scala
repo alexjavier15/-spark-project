@@ -520,6 +520,15 @@ object SQLConf {
       " plan",
     isPublic = false)
 
+  val HASHJOIN_ITERATOR_ENABLED = booleanConf("spark.sql.IteratedHashJoin",
+    defaultValue = Some(false),
+    doc = "When true, the IteratedHashJoin logic is used instead of BroadcastHashJoin" +
+      " plan",
+    isPublic = false)
+
+
+
+
   object Deprecated {
     val MAPRED_REDUCE_TASKS = "mapred.reduce.tasks"
     val EXTERNAL_SORT = "spark.sql.planner.externalSort"
@@ -641,6 +650,8 @@ class SQLConf extends Serializable with CatalystConf with ParserConf with Loggin
   def supportSQL11ReservedKeywords: Boolean = getConf(PARSER_SUPPORT_SQL11_RESERVED_KEYWORDS)
 
   def mJoinEnabled: Boolean = getConf(MJOIN_ENABLED)
+
+  def iteratedHashJoinEnabled: Boolean = getConf(HASHJOIN_ITERATOR_ENABLED)
 
 
   /** ********************** SQLConf functionality methods ************ */

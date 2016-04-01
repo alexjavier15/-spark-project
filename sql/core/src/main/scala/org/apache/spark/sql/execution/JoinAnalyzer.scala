@@ -39,10 +39,8 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
 
     // fore very  HadoopPfRelation found build relation for every chunk
 
-   val res =  sources.map(plan => (plan._1, splitRelation(plan._1, plan._2)))
+ sources.map(plan => (plan._1, splitRelation(plan._1, plan._2)))
 
-    res.foreach(x => println(x._2))
-    res
 
   }
 
@@ -54,14 +52,14 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
       case None => Seq(plan)
       case Some(h) =>
         val splittedHPFRelation = h.splitHadoopPfRelation()
+
         splittedHPFRelation.map(newRel => {
-         val res = plan transform {
+       plan transform {
             case l@LogicalRelation(h: HadoopPfRelation, a, b) =>
-              println(newRel)
-              LogicalRelation(newRel, a, b)
+
+              LogicalRelation(newRel, Some(l.output), b)
           }
-          println(res)
-          res}
+       }
           )
     }
   }
@@ -174,7 +172,6 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
         val analyzedOriginal = optimizePlans(Seq(originPlan)).head
       //val (leaves, filters) = extractJoins(analyzedOriginal).getOrElse((Seq(), Seq()))
       val converted = convertToChunkedJoinPlan(Seq(originPlan), chunkedRels)
-      converted.foreach(x => println(x))
       val originalChunked = optimizePlans(converted)
       //Extract the first Join. To-Do : Mjoin must not have a join as child we do that to
       // test execution of at least one plan
@@ -214,7 +211,6 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
         case logical.SubqueryAlias(_, l@LogicalRelation(h: HadoopPfRelation, _, _)) =>
           logicalPlan transform {
             case l@LogicalRelation(parent: HadoopPfRelation, _, _) if h.isChild(parent) =>
-              println("Making substitution")
               substitution
           }
         case _ => logicalPlan
@@ -258,7 +254,6 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
     root match {
       case j: T => plan
       case node: logical.UnaryNode =>
-        println(node.nodeName)
         node.withNewChildren(Seq(appendPlan(node.child, plan)))
       case others => throw new IllegalArgumentException("Not found :" + plan.nodeName + " Only UnaryNode must be above a Join " + others.nodeName)
     }

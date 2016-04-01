@@ -29,7 +29,7 @@ import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.UnsafeProjection
 import org.apache.spark.sql.execution.datasources.CompressionCodecs
-import org.apache.spark.sql.execution.datasources.pf.PFileRDD
+//import org.apache.spark.sql.execution.datasources.pf.PFileRDD
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.util.SerializableConfiguration

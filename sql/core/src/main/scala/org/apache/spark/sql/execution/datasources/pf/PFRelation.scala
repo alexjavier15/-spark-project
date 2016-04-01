@@ -47,16 +47,19 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
   }
 
 
+  override val schema: StructType = {if (hasParent) {
+    println("returning parent schema ");parent.schema} else dataSchema}
+
   /*val fileDesc = PFRelation.readPFileInfo(location.paths.head.getName)
 
 
-  override  val paths = fileDesc.chunkPFArray.map(chunk  => "file:"+chunk.data_location)
+    override  val paths = fileDesc.chunkPFArray.map(chunk  => "file:"+chunk.data_location)
 
-  override  lazy val dataSchema: StructType = maybeDataSchema match {
-    case Some(structType) => structType
-    case None => fileDesc.strucType
-  }
-*/
+    override  lazy val dataSchema: StructType = maybeDataSchema match {
+      case Some(structType) => structType
+      case None => fileDesc.strucType
+    }
+  */
   override def toString: String = { super.toString + ", " + pFLocation.toString }
 }
 
