@@ -76,6 +76,7 @@ sql/hive-thriftserver/test_warehouses
 # For R session data
 .RHistory
 .RData
+*/*/*/test/*
 */*/src/test/*
 */src/test/*
 yarn/src/test/*
