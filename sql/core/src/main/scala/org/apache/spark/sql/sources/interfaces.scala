@@ -712,7 +712,7 @@ class PFileCatalog(
                     paths: Seq[Path],
                     partitionSchema: Option[StructType],
                     val pfFileDesc : PFileDesc)
-  extends HDFSFileCatalog(sqlContext,parameters, paths,partitionSchema ){
+  extends HDFSFileCatalog(sqlContext,parameters, paths,partitionSchema )  with Serializable{
 
 
   def splitPFileCatalog() : Seq[PFileCatalog] = {

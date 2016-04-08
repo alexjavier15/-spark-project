@@ -34,7 +34,7 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
     dataSchema,
     bucketSpec,
     fileFormat,
-    options) {
+    options) with Serializable{
 
   def hasParent : Boolean = parent!=null
 
@@ -198,7 +198,7 @@ case class PFileDesc(file_name: String,
     println(chunkDesc)
     chunkDesc
   })
-  implicit val formats = DefaultFormats
+  implicit val formats = new Serializable {DefaultFormats}
   val structType: Option[StructType] = DataType.fromJson(fromFile(schema_location).getLines.reduce(_ + _)) match {
     case e: StructType => Some(e)
     case _ => None
@@ -221,3 +221,4 @@ case class PFileDesc(file_name: String,
     chunk_locations.map(v => v.toString + System.lineSeparator).reduce(_ + _) + " ])"
 
 }
+

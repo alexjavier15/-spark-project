@@ -63,6 +63,7 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
 
     lazy val sparkPlan: SparkPlan = {
       SQLContext.setActive(sqlContext)
+      SQLContext.createListenerAndUI(sqlContext.sparkContext)
       sqlContext.sessionState.planner.plan(ReturnAnswer(optimizedPlan)).next()
     }
 

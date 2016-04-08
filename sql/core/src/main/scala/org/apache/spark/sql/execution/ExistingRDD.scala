@@ -286,3 +286,18 @@ private[sql] object DataSourceScan {
   val INPUT_PATHS = "InputPaths"
   val PUSHED_FILTERS = "PushedFilters"
 }
+
+/** Dummy plan node for scanning data from a holder relation. */
+private[sql] case class HolderDataSourceScan(
+
+                                        @transient relation: BaseRelation)
+  extends LeafNode{
+
+  override val output: Seq[Attribute] = Nil
+  /**
+    * Overridden by concrete implementations of SparkPlan.
+    * Produces the result of the query as an RDD[InternalRow]
+    */
+  override protected def doExecute(): RDD[InternalRow] =  throw new UnsupportedOperationException("HolderDataSourceScan" +
+    "does not support the execute() code path. it should be replace with the corresponding DataSourceScan ")
+}

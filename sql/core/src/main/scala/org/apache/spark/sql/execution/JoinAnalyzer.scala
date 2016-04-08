@@ -5,7 +5,7 @@ import org.apache.spark.sql.catalyst.expressions.{And, Expression, PredicateHelp
 import org.apache.spark.sql.catalyst.plans.Inner
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan}
-import org.apache.spark.sql.execution.datasources.LogicalRelation
+import org.apache.spark.sql.execution.datasources.{HolderLogicalRelation, LogicalRelation}
 import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 
 import scala.collection.mutable
@@ -29,13 +29,17 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
 
 
   private def findChunkedBaseRelPlans(): Seq[(LogicalPlan, Seq[LogicalPlan])] = {
+    if(sqlContext.conf.mJoinEnabled == false )
+      Seq.empty
 
     //  Map every baseRealtion with its HadoopPfRelation
     val sources = baseRelations.map {
-      case relation@logical.SubqueryAlias(_, l@LogicalRelation(h: HadoopPfRelation, _, _)) =>
+      case relation @ logical.SubqueryAlias(_, l@LogicalRelation(h: HadoopPfRelation, _, _)) =>
         (relation, Some(h))
       case relation => (relation, None)
     }
+
+
 
     // fore very  HadoopPfRelation found build relation for every chunk
 
@@ -70,6 +74,8 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
     *
     */
   private def extractJoins(plan: LogicalPlan): Option[(Seq[LogicalPlan], Seq[Expression])] = {
+    if(sqlContext.conf.mJoinEnabled == false )
+      Seq.empty
 
     // flatten all inner joins, which are next to each other
     def flattenJoin(plan: LogicalPlan): (Seq[LogicalPlan], Seq[Expression]) = plan match {
@@ -154,8 +160,24 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
 
   }
 
+  private def withHolders(logicalPlan: LogicalPlan): LogicalPlan ={
+
+   logicalPlan transformUp {
+
+       case l @ LogicalRelation(h: HadoopPfRelation, a, b) =>
+
+         HolderLogicalRelation(l,h);
+
+
+   }
+
+  }
+
   private def analyzeWithMJoin(inferedPlans: List[(List[LogicalPlan],
     List[Option[Expression]])]): Option[LogicalPlan] = {
+
+    if(sqlContext.conf.mJoinEnabled == false )
+      List.empty
 
     if (inferedPlans == Nil) {
       None
@@ -165,11 +187,16 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
       // filter any infered plan with null join clauses
       val resolved = inferedPlans.map(x => (x._1, x._2.map(expr => expr.orNull))).
         filter(x => !x._2.contains(null))
+      // transform by remplacing LogicalRelations by  HolderLogicalRelations (Saving plannign time)
+      /*
+      * TO-DO
+      * */
+
       // anylyzed the reordered joins
       val analyzedJoins = resolved.map(subplan => optimizeSubplan(subplan._1, subplan._2))
       // We can gather one for all the leaves relations (we assume unique projections and
       // filter. Plan the original plan and get the result
-        val analyzedOriginal = optimizePlans(Seq(originPlan)).head
+      val analyzedOriginal = optimizePlans(Seq(originPlan)).head
       //val (leaves, filters) = extractJoins(analyzedOriginal).getOrElse((Seq(), Seq()))
       val converted = convertToChunkedJoinPlan(Seq(originPlan), chunkedRels)
       val originalChunked = optimizePlans(converted)
@@ -183,12 +210,15 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
       val chunkedOriginalJoin = originalChunked.map(findRootJoin(_))
       val union = sqlContext.sessionState.analyzer.execute(logical.Union(chunkedOriginalJoin))
       // val analyzedUnion = sqlContext.sessionState.optimizer.execute(union)
-      val mJoin = logical.MJoin(union, analyzedChunkedRelations, Some(analyzedJoins))
+      val mJoin = logical.MJoin(union,sqlContext.sparkContext.broadcast[Seq[LogicalPlan]](chunkedOriginalJoin), analyzedChunkedRelations, Some(analyzedJoins))
+
+      //val mJoin = logical.MJoin(union,optimizePlans(chunkedOriginalJoin), analyzedChunkedRelations, Some(analyzedJoins))
 
       // make a copy of all plans above the root join and append the MJoin plan
      val res =appendPlan[logical.Join](analyzedOriginal, mJoin)
 
       Some(optimizePlans(Seq(res)).head)
+
 
 
     }
@@ -243,9 +273,11 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
 
     // Analyze
     val optimizedPlan = optimizePlans(Seq(dummy_plan)).head
+    // Roplace wil holders
+    val holdersReplaced = withHolders(optimizedPlan)
     // return the Join root plan (remove filter and projection nodes as they are the same
     // for each subplan
-    findRootJoin(optimizedPlan)
+    findRootJoin(holdersReplaced)
 
   }
 

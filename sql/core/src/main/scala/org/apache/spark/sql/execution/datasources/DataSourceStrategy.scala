@@ -89,6 +89,14 @@ private[sql] object DataSourceAnalysis extends Rule[LogicalPlan] {
  */
 private[sql] object DataSourceStrategy extends Strategy with Logging {
   def apply(plan: LogicalPlan): Seq[execution.SparkPlan] = plan match {
+
+      /**
+        * Alex: for mjoin
+        * */
+    case HolderLogicalRelation(l, r)=>  apply(l)
+    /**
+      * Normal execution
+      * */
     case PhysicalOperation(projects, filters, l @ LogicalRelation(t: CatalystScan, _, _)) =>
       pruneFilterProjectRaw(
         l,

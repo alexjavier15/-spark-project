@@ -269,6 +269,7 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
   /**
    * Runs this query returning the result as an array.
    */
+
   def executeCollect(): Array[InternalRow] = {
     val byteArrayRdd = getByteArrayRdd()
 
@@ -277,6 +278,31 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
       decodeUnsafeRows(bytes, results)
     }
     results.toArray
+  }
+
+  @transient
+  private lazy val metricsFuture: Future[broadcast.Broadcast[Map[String, SQLMetric[_, _]]]] = {
+    // broadcastFuture is used in "doExecute". Therefore we can get the execution id correctly here.
+    val executionId = sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
+    Future {
+      // This will run in another thread. Set the execution id so that we can connect these jobs
+      // with the correct execution.
+      SQLExecution.withExecutionId(sparkContext, executionId) {
+        // Note that we use .executeCollect() because we don't want to convert data to Scala types
+        val input: Array[InternalRow] = executeCollect()
+        logDebug("metrics " + metrics.get("numOutputRows"))
+        // Construct and broadcast the relation.
+        sparkContext.broadcast[Map[String, SQLMetric[_, _]]](metrics)
+      }
+    }(ExecutionContext.fromExecutorService(
+      ThreadUtils.newDaemonCachedThreadPool("broadcast-exchange", 128)))
+  }
+
+  def executeBroadcastMetrics(): broadcast.Broadcast[Map[String, SQLMetric[_, _]]] ={
+
+    val result = Await.result(metricsFuture, Duration.Inf)
+    result.asInstanceOf[broadcast.Broadcast[Map[String, SQLMetric[_, _]]]]
+
   }
 
   /**

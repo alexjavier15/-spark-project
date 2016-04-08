@@ -21,12 +21,14 @@ import java.util.concurrent.ConcurrentMap
 
 import com.google.common.collect.MapMaker
 import org.apache.spark.broadcast
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.datasources.pf
 import org.apache.spark.sql.execution.datasources.pf.PFRelation.{CHUNK_NUM, CHUNK_RECORDS}
-import org.apache.spark.sql.execution.{DataSourceScan, Filter, SparkPlan, UnaryNode}
+import org.apache.spark.sql.execution._
 import org.apache.spark.sql.sources.{HadoopFsRelation, PFileCatalog}
 
 import scala.collection.JavaConverters._
@@ -39,6 +41,7 @@ import scala.reflect.ClassTag
  */
 case class BroadcastMJoin(
             child : SparkPlan,
+            chunkedchild : Broadcast[Seq[LogicalPlan]],
             baseRelations : Seq[SparkPlan],
             subplans : Option[Seq[SparkPlan]]
                          )
@@ -178,7 +181,23 @@ private def chunkHasSubplans(relIdx : Int, chunkIdx : Int) : Boolean = {
     sqlContext.sparkContext.setLocalProperty("chunksFor"+key,"1")
     println("setting chunks for : " + key)
   }
-    child.execute()
+
+    sqlContext.setConf  ("spark.sql.mjoin", "false")
+    sparkContext.union(  chunkedchild.value.map(plan=> {
+      /*val  metrics = plan.executeBroadcastMetrics()
+       println(metrics.value)
+
+     val info = SparkPlanInfo.fromSparkPlan(child)
+      println(info.metrics)
+      SQLExecution.withExecution
+      plan.execute()
+
+*/
+      sqlContext.executePlan(plan).toRdd
+    }
+    ))
+
+   // this.chunkedchild.map(_.execute()).reduce(_.union(_));
 }
 
   override def output: Seq[Attribute] = child.output

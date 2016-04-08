@@ -41,7 +41,7 @@ import scala.io.BufferedSource
 
 
 
-class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.DefaultSource with DataSourceRegister {
+class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.DefaultSource with DataSourceRegister with Serializable {
 
 
   override def shortName(): String = "pf"
