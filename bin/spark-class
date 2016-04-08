@@ -35,6 +35,8 @@ else
   fi
 fi
 
+
+
 # Find Spark jars.
 # TODO: change the directory name when Spark jars move from "lib".
 if [ -f "${SPARK_HOME}/RELEASE" ]; then
@@ -42,6 +44,8 @@ if [ -f "${SPARK_HOME}/RELEASE" ]; then
 else
   SPARK_JARS_DIR="${SPARK_HOME}/assembly/target/scala-$SPARK_SCALA_VERSION"
 fi
+
+echo "$SPARK_JARS_DIR"
 
 if [ ! -d "$SPARK_JARS_DIR" ]; then
   echo "Failed to find Spark jars directory ($SPARK_JARS_DIR)." 1>&2
