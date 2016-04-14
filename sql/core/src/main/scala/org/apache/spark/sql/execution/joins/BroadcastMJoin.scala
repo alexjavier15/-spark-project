@@ -217,14 +217,14 @@ case class BroadcastMJoin(
       hashCondition.selectivity= join.selectivity()
       val cardInfo = new CardinalityInfo(baseRels, cardinality)
       if (_relationLengthToRelations.contains(join.numLeaves))
-        _relationLengthToRelations(join.numLeaves) = _relationLengthToRelations(join.numLeaves) + cardInfo
+         _relationLengthToRelations(join.numLeaves) += cardInfo
       else
         _relationLengthToRelations += (join.numLeaves -> Set(cardInfo))
     })
 
     baseRelations.map(relation => new CardinalityInfo(Set(relation), relation.getOutputRows)).foreach(cardInfo => {
       if (_relationLengthToRelations.contains(1))
-        _relationLengthToRelations(1) = _relationLengthToRelations(1) + cardInfo
+        _relationLengthToRelations(1) += cardInfo
       else
         _relationLengthToRelations += (1L -> Set(cardInfo))
 

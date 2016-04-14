@@ -38,6 +38,7 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
     options) with Serializable{
 
   def hasParent : Boolean = parent!=null
+//  println("Initiating HaddopPfRelation for _" + this + " hashcode :" + this.hashCode)
 
   def isChild(relation : HadoopPfRelation): Boolean = hasParent && parent == relation
   def  splitHadoopPfRelation(): Seq[HadoopPfRelation] = {

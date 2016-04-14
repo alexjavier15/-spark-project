@@ -130,11 +130,19 @@ private[sql] case class DataSourceScan(
     override val metadata: Map[String, String] = Map.empty)
   extends LeafNode with CodegenSupport {
 
-  override def hashCode(): Int = relation.hashCode()
+
+  val hashcode : Int = relation.hashCode
+
+  println("Initiating datasource scan for _" + this + " hashcode :" + hashcode)
+
+  override def hashCode(): Int = hashcode
 
   override def equals(o: Any): Boolean = {
     o match {
-    case o: DataSourceScan => relation.equals(o.relation)
+    case o: DataSourceScan => {
+      println("Calling equal for " + this.hashcode + " hashcode :" + hashcode)
+
+      hashcode.equals(o.hashcode)}
     case _ => false
   }
   }
