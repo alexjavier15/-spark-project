@@ -46,7 +46,9 @@ case class IteratedHashJoin(
   extends BinaryNode with HashJoin with CodegenSupport {
 
   override private[sql] lazy val metrics = Map(
-    "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"))
+    "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"),
+    "numStreamedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of streamed matched rows"),
+    "numHashedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of hashed matched rows"))
 
   override def outputPartitioning: Partitioning = streamedPlan.outputPartitioning
 
@@ -58,14 +60,27 @@ case class IteratedHashJoin(
 
   protected override def doExecute(): RDD[InternalRow] = {
     val numOutputRows = longMetric("numOutputRows")
-    println("Executor ID : "+SparkEnv.get.executorId)
-    sparkContext.killExecutor(SparkEnv.get.executorId)
+    val numStreamedMatchedRows = Option(longMetric("numStreamedMatchedRows"))
+    val numHashedMatchedRows = Option(longMetric("numHashedMatchedRows"))
+
+    val streamed =  streamedPlan.execute()
+    val built = buildPlan.execute()
+    val numPartitions =Math.min( Math.min(streamed.getNumPartitions, built.getNumPartitions) ,2)
+    val mod = numPartitions + 1
+    var shift = 0
+    for ( x <- 0 to numPartitions){
+
+
+
+    }
+
     streamedPlan.execute().zipPartitions(buildPlan.execute()) { (streamIter, buildIter) =>
+
       val hashed = HashedRelation(buildIter.map(_.copy()), buildSideKeyGenerator)
       val joinedRow = new JoinedRow
       joinType match {
         case Inner =>
-          hashJoin(streamIter, hashed, numOutputRows)
+          hashJoin(streamIter, hashed, numOutputRows, numStreamedMatchedRows,numHashedMatchedRows )
 
         case LeftSemi =>
           hashSemiJoin(streamIter, hashed, numOutputRows)

@@ -196,10 +196,12 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
       val analyzedJoins = resolved.map(subplan => optimizeSubplan(subplan._1, subplan._2))
       // We can gather one for all the leaves relations (we assume unique projections and
       // filter. Plan the original plan and get the result
-      val analyzedOriginal = optimizePlans(Seq(originPlan)).head
+     // val analyzedOriginal = optimizePlans(Seq(originPlan)).head
       //val (leaves, filters) = extractJoins(analyzedOriginal).getOrElse((Seq(), Seq()))
-      val converted = convertToChunkedJoinPlan(Seq(originPlan), chunkedRels)
-      val originalChunked = optimizePlans(converted)
+      println(chunkedRels)
+      val chunkedOriginal = convertToChunkedJoinPlan(Seq(originPlan), chunkedRels)
+      val chunkedOriginalAnalyzed= chunkedOriginal.map(sqlContext.sessionState.analyzer.execute(_))
+      val chunkedOriginalOptimized = optimizePlans(chunkedOriginalAnalyzed)
       //Extract the first Join. To-Do : Mjoin must not have a join as child we do that to
       // test execution of at least one plan
 
@@ -207,15 +209,15 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
         ( optimizePlans(Seq(relations._1)).head ,optimizePlans(relations._2)))
       //Experimental:
 
-      val chunkedOriginalJoin = originalChunked.map(findRootJoin(_))
-      val union = sqlContext.sessionState.analyzer.execute(logical.Union(chunkedOriginalJoin))
-      // val analyzedUnion = sqlContext.sessionState.optimizer.execute(union)
-      val mJoin = logical.MJoin(union,sqlContext.sparkContext.broadcast[Seq[LogicalPlan]](chunkedOriginalJoin), analyzedChunkedRelations, Some(analyzedJoins))
+      val chunkedOriginalJoin = chunkedOriginalOptimized.map(findRootJoin(_))
+    //  val union = sqlContext.sessionState.analyzer.execute(logical.Union(chunkedOriginalJoin))
+    //  val analyzedUnion = sqlContext.sessionState.optimizer.execute(union)
+      val mJoin = logical.MJoin(findRootJoin(originPlan),chunkedOriginalJoin, analyzedChunkedRelations, Some(analyzedJoins))
 
       //val mJoin = logical.MJoin(union,optimizePlans(chunkedOriginalJoin), analyzedChunkedRelations, Some(analyzedJoins))
 
       // make a copy of all plans above the root join and append the MJoin plan
-     val res =appendPlan[logical.Join](analyzedOriginal, mJoin)
+     val res =appendPlan[logical.Join](optimizePlans(Seq(originPlan)).head, mJoin)
 
       Some(optimizePlans(Seq(res)).head)
 
@@ -227,13 +229,16 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
 
   private def optimizePlans( plans : Seq[LogicalPlan]): Seq[LogicalPlan] ={
 
-       plans foreach sqlContext.sessionState.analyzer.checkAnalysis
       val analyzed : Seq[LogicalPlan] =  plans map sqlContext.sessionState.analyzer.execute
+      plans foreach sqlContext.sessionState.analyzer.checkAnalysis
+
 
       analyzed map sqlContext.sessionState.optimizer.execute
   }
 
-  private def convertToChunkedJoinPlan(logicalPlans: Seq[LogicalPlan], dict: Seq[(LogicalPlan, Seq[LogicalPlan])]): Seq[LogicalPlan] = {
+  private[sql] def convertToChunkedJoinPlan(logicalPlans: Seq[LogicalPlan],
+                                            dict: Seq[(LogicalPlan,
+                                              Seq[LogicalPlan])]): Seq[LogicalPlan] = {
 
     def replaceWith(logicalPlan: LogicalPlan, substitution: LogicalPlan): LogicalPlan = {
 

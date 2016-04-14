@@ -53,6 +53,7 @@ private[ui] case class SparkPlanGraph(
       case node => Seq(node)
     }
   }
+
 }
 
 private[sql] object SparkPlanGraph {

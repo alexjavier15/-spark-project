@@ -21,7 +21,7 @@ import org.apache.spark.sql.Strategy
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
-import org.apache.spark.sql.catalyst.planning._
+import org.apache.spark.sql.catalyst.planning.{GenericStrategy, _}
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.logical.{BroadcastHint, LogicalPlan}
 import org.apache.spark.sql.catalyst.plans.physical._
@@ -149,12 +149,12 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
 
       case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
       if(conf.iteratedHashJoinEnabled) =>
-        val buildSide =
-          if (right.statistics.sizeInBytes <= left.statistics.sizeInBytes) {
+        val buildSide = BuildRight
+         /* if (right.statistics.sizeInBytes <= left.statistics.sizeInBytes) {
             BuildRight
           } else {
             BuildLeft
-          }
+          }*/
         Seq(joins.IteratedHashJoin(
           leftKeys, rightKeys, Inner, buildSide, condition, planLater(left), planLater(right)))
 
@@ -278,7 +278,7 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         }
 
         val aggregateOperator =
-          if (aggregateExpressions.map(_.aggregateFunction).exists(!_.supportsPartial)) {
+          if (aggregateExpressions.map(_.aggregateFunction).exists(!_.supportsPartial)  ) {
             if (functionsWithDistinct.nonEmpty) {
               sys.error("Distinct columns cannot exist in Aggregate operator containing " +
                 "aggregate functions which don't support partial aggregation.")
@@ -310,6 +310,19 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         aggregateOperator
 
       case _ => Nil
+    }
+  }
+
+  object PushDownPartialAggregation extends Strategy {
+    def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
+      case logical.Aggregate( groupingExpressions,
+      resultExpressions,
+      l @ logical.MJoin(child, chunkedChild, baseRelations, subplans)
+      ) =>  planLater( logical.MJoin(child,
+        chunkedChild.map(child=> plan.withNewChildren(Seq(child))), baseRelations, subplans)) ::Nil
+      case _ => Nil
+
+
     }
   }
 
@@ -480,8 +493,8 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
       case logical.MJoin(child, chunkedChild, baseRelations, subplans) =>
         joins.BroadcastMJoin(
           planLater(child),
-          chunkedChild,
-          //chunkedChild.map(plan => planLater(plan)),
+          //chunkedChild,
+          chunkedChild.map(plan => planLater(plan)),
           baseRelations.map( plan => planLater(plan._1)),
           Some(subplans.getOrElse(Seq()).map(planLater(_))))::Nil
       case _ => Nil

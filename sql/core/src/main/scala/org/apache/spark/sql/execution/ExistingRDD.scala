@@ -130,6 +130,15 @@ private[sql] case class DataSourceScan(
     override val metadata: Map[String, String] = Map.empty)
   extends LeafNode with CodegenSupport {
 
+  override def hashCode(): Int = relation.hashCode()
+
+  override def equals(o: Any): Boolean = {
+    o match {
+    case o: DataSourceScan => relation.equals(o.relation)
+    case _ => false
+  }
+  }
+
   override val nodeName: String = relation.toString
 
   // Ignore rdd when checking results
@@ -137,6 +146,8 @@ private[sql] case class DataSourceScan(
     case other: DataSourceScan => relation == other.relation && metadata == other.metadata
     case _ => false
   }
+
+
 
   private[sql] override lazy val metrics = Map(
     "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"))
@@ -288,10 +299,8 @@ private[sql] object DataSourceScan {
 }
 
 /** Dummy plan node for scanning data from a holder relation. */
-private[sql] case class HolderDataSourceScan(
-
-                                        @transient relation: BaseRelation)
-  extends LeafNode{
+private[sql] case class HolderDataSourceScan(child: SparkPlan)
+  extends UnaryNode{
 
   override val output: Seq[Attribute] = Nil
   /**

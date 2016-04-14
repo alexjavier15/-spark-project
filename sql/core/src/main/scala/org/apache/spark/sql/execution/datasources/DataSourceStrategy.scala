@@ -35,7 +35,7 @@ import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.pf.PFRelation.{CHUNK_NUM, CHUNK_RECORDS}
 import org.apache.spark.sql.execution.DataSourceScan.{INPUT_PATHS, PUSHED_FILTERS}
-import org.apache.spark.sql.execution.SparkPlan
+import org.apache.spark.sql.execution.{HolderDataSourceScan, SparkPlan}
 import org.apache.spark.sql.execution.command.ExecutedCommand
 import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 import org.apache.spark.sql.execution.vectorized.{ColumnVectorUtils, ColumnarBatch}
@@ -93,7 +93,7 @@ private[sql] object DataSourceStrategy extends Strategy with Logging {
       /**
         * Alex: for mjoin
         * */
-    case HolderLogicalRelation(l, r)=>  apply(l)
+    case HolderLogicalRelation(l, r)=>  HolderDataSourceScan(apply(l).head) ::Nil
     /**
       * Normal execution
       * */

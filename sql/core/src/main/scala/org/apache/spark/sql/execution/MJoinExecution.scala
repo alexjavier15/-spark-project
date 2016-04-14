@@ -18,11 +18,9 @@
 
 package org.apache.spark.sql.execution
 
-import javafx.print.PrinterJob.JobStatus
-
 import org.apache.spark.{JobExecutionStatus, SparkConf}
 import org.apache.spark.internal.Logging
-import org.apache.spark.scheduler.{SparkListener, SparkListenerJobEnd}
+import org.apache.spark.scheduler.{SparkListener, SparkListenerJobEnd, SparkListenerJobStart, SparkListenerStageCompleted}
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.util.QueryExecutionListener
@@ -57,15 +55,7 @@ class MJoinExecution(plan: LogicalPlan,
     relID
   }
 
-  def ex(): Unit = {
 
-    val job = sc.submitJob(sc.parallelize(List(1)), { iter => while (iter.hasNext) {
-
-      iter.next
-    }
-    }, 0 until 1, (index, data) => Unit, Unit)
-
-  }
 
   def onSuccesJob(jobId: Int): Unit = {
 
@@ -97,7 +87,15 @@ class MJoinExecution(plan: LogicalPlan,
 
 }
 
+private[sql] class TestMJoinListener()  extends SparkListener with Logging {
 
+    override def onJobEnd(jobEnd: SparkListenerJobEnd): Unit = {
+
+    println("***************JOB ID**********"+ jobEnd.jobId+"**********")
+
+    }
+
+}
 private[sql] class MJoinListener(conf: SparkConf,
                                  mjoinExecution: MJoinExecution
                                 ) extends SparkListener with Logging {
@@ -106,4 +104,6 @@ private[sql] class MJoinListener(conf: SparkConf,
     mjoinExecution.onSuccesJob(jobEnd.jobId)
 
   }
+
+
 }

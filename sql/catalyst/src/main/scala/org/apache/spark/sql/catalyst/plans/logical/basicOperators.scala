@@ -690,7 +690,7 @@ case object OneRowRelation extends LeafNode {
 }
 
 case class MJoin(child : LogicalPlan ,
-                 chunkedChild:  Broadcast[Seq[LogicalPlan]],
+                 chunkedChild:  Seq[LogicalPlan],
                  leaves : Seq[ (LogicalPlan,Seq[LogicalPlan] )] ,
                  others: Option[Seq[LogicalPlan] ]) extends UnaryNode{
 

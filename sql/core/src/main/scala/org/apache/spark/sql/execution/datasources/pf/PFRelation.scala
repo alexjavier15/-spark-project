@@ -12,6 +12,7 @@ import org.apache.spark.sql.types.{DataType, StructType}
 import org.json4s.DefaultFormats
 import org.json4s.jackson.JsonMethods._
 
+import scala.collection.mutable
 import scala.io.BufferedSource
 import scala.io.Source._
 
@@ -47,6 +48,16 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
   }
 
 
+  override def hashCode(): Int = pFileDesc.hashCode()+location.hashCode()
+
+  override def equals(o: scala.Any): Boolean = {
+    o match{
+    case h : HadoopPfRelation if  pFileDesc.equals(h.pFileDesc) &&
+      pFLocation.equals(h.location) => true
+    case _ => false
+
+  }}
+
   override val schema: StructType = {if (hasParent) {
     println("returning parent schema ");parent.schema} else dataSchema}
 
@@ -66,6 +77,7 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
 protected[sql] object PFRelation extends Logging {
 
   lazy val sparkContext = SparkContext.getOrCreate()
+  private var _dataSources = mutable.Set[HadoopPfRelation]()
   val CHUNK_NUM = "ChunkNumber"
   val CHUNK_RECORDS = "ChunkRecords"
   val GET_CHUNK = "GET:"

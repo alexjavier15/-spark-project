@@ -23,8 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
-
-import org.apache.spark.{broadcast, SparkEnv}
+import org.apache.spark.{SparkEnv, broadcast}
 import org.apache.spark.internal.Logging
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{RDD, RDDOperationScope}
@@ -35,14 +34,18 @@ import org.apache.spark.sql.catalyst.expressions.codegen._
 import org.apache.spark.sql.catalyst.plans.QueryPlan
 import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.sql.execution.metric.{LongSQLMetric, SQLMetric}
+import org.apache.spark.sql.execution.ui.SparkPlanGraph
 import org.apache.spark.sql.types.DataType
 import org.apache.spark.util.ThreadUtils
+
+import scala.reflect.ClassTag
 
 /**
  * The base class for physical operators.
  */
 abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializable {
 
+  val OUTPUT_ROWS_KEY : String = "numOutputRows"
   /**
    * A handle to the SQL Context that was used to create this plan.   Since many operators need
    * access to the sqlContext for RDD operations or configuration this field is automatically
@@ -53,6 +56,37 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
 
   protected def sparkContext = sqlContext.sparkContext
 
+  var hasSelectivity : Boolean = false
+  def selectivity() : Double = getOutputRows.asInstanceOf[Double]/children.map(_.getOutputRows).product
+
+  def getOutputRows: Long = {
+    if (metrics.contains(OUTPUT_ROWS_KEY)) {
+      val rows = metrics(OUTPUT_ROWS_KEY).asInstanceOf[LongSQLMetric].value.value
+      rows match {
+        case r: Long if r <= 0L => 1
+        case _ => rows
+      }
+    }
+    else
+      1
+  }
+
+  def planCost() : Long = {
+    throw new UnsupportedOperationException(s"$nodeName does not implement plan costing")
+  }
+
+  def extractNodes[T: ClassTag] : Seq[T] = {
+
+    this match {
+      case node : T => Seq(node) ++ children.flatMap(_.extractNodes)
+      case  _ => children.flatMap(_.extractNodes)
+
+    }
+
+  }
+  def numLeaves : Long = {
+    throw new UnsupportedOperationException(s"$nodeName does not implement numLeaves")
+  }
   // sqlContext will be null when we are being deserialized on the slaves.  In this instance
   // the value of subexpressionEliminationEnabled will be set by the deserializer after the
   // constructor has run.
@@ -90,11 +124,13 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
     metrics.valuesIterator.foreach(_.reset())
   }
 
+
   /**
    * Return a LongSQLMetric according to the name.
    */
   private[sql] def longMetric(name: String): LongSQLMetric =
     metrics(name).asInstanceOf[LongSQLMetric]
+
 
   // TODO: Move to `DistributedPlan`
   /** Specifies how data is partitioned across different nodes in the cluster. */
@@ -183,6 +219,15 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
     subqueryResults.clear()
   }
 
+  override def equals(o: scala.Any): Boolean =  o match {
+      case s : SparkPlan => this.sameResult(s)
+      case _  => false
+
+    }
+
+
+
+
   /**
    * Prepare a SparkPlan for execution. It's idempotent.
    */
@@ -192,6 +237,7 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
       prepareSubqueries()
       children.foreach(_.prepare())
     }
+
   }
 
   /**
@@ -266,6 +312,13 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
     }
   }
 
+  def printMetrics : Unit = {
+    println(nodeName + " :" +metrics)
+    println("Selectivity" + " :" +selectivity())
+    children.foreach(_.printMetrics)
+
+  }
+
   /**
    * Runs this query returning the result as an array.
    */
@@ -277,7 +330,13 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
     byteArrayRdd.collect().foreach { bytes =>
       decodeUnsafeRows(bytes, results)
     }
+    //val executionId = sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
+    //println(executionId)
+  //  val metrics  = sqlContext.listener.getExecutionMetrics(0)
+    //val executionUIData =  sqlContext.listener.executionIdToData(0)
+    //println(executionUIData.physicalPlanGraph.makeDotFile(metrics))
     results.toArray
+
   }
 
   @transient
@@ -304,6 +363,7 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
     result.asInstanceOf[broadcast.Broadcast[Map[String, SQLMetric[_, _]]]]
 
   }
+
 
   /**
    * Runs this query returning the result as an array, using external Row format.
@@ -356,11 +416,14 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
 
       partsScanned += p.size
     }
-
     if (buf.size > n) {
+
+
       buf.take(n).toArray
     } else {
+
       buf.toArray
+
     }
   }
 
@@ -403,14 +466,24 @@ object SparkPlan {
 private[sql] trait LeafNode extends SparkPlan {
   override def children: Seq[SparkPlan] = Nil
   override def producedAttributes: AttributeSet = outputSet
+  override def planCost(): Long =  getOutputRows
+  override def numLeaves: Long = 1L
+
 }
 
 private[sql] trait UnaryNode extends SparkPlan {
   def child: SparkPlan
 
+  override private[sql] lazy val metrics =  child.metrics
   override def children: Seq[SparkPlan] = child :: Nil
 
   override def outputPartitioning: Partitioning = child.outputPartitioning
+
+  override def planCost: Long =  child.planCost()
+
+  override def numLeaves: Long = child.numLeaves
+
+
 }
 
 private[sql] trait BinaryNode extends SparkPlan {
@@ -418,4 +491,10 @@ private[sql] trait BinaryNode extends SparkPlan {
   def right: SparkPlan
 
   override def children: Seq[SparkPlan] = Seq(left, right)
+
+  override def planCost(): Long =  left.planCost() + left.getOutputRows
+
+  override def numLeaves: Long = left.numLeaves + right.numLeaves
+
+
 }

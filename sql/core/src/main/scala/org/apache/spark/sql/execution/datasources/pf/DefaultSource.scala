@@ -107,8 +107,7 @@ class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.Defau
 
     val path = files.filterNot(_.getPath.getName startsWith "_").map(_.getPath.toString).head
 
-    val fileDesc = PFRelation.extractPFMetadata[PFileDesc](path)
-    return fileDesc.structType
+     PFRelation.extractPFMetadata[PFileDesc](path).structType
 
   }
 
@@ -119,3 +118,4 @@ class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.Defau
     */
   override def prepareWrite(sqlContext: SQLContext, job: Job, options: Map[String, String], dataSchema: StructType): OutputWriterFactory = null
 }
+

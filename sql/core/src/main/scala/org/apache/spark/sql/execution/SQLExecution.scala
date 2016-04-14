@@ -30,7 +30,8 @@ private[sql] object SQLExecution {
   val EXECUTION_ID_KEY = "spark.sql.execution.id"
 
   private val _nextExecutionId = new AtomicLong(0)
-
+  private val _nextRelationId = new AtomicLong(0)
+  private def nextRelationId: Long = _nextExecutionId.getAndIncrement
   private def nextExecutionId: Long = _nextExecutionId.getAndIncrement
 
   /**

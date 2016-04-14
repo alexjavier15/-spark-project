@@ -45,8 +45,10 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
   }
   lazy val joinAnalyzer = new JoinAnalyzer(withCachedData,sqlContext)
   lazy val mJoinPlan : Option[LogicalPlan] = {
-    if(sqlContext.conf.mJoinEnabled == true )
+    if(sqlContext.conf.mJoinEnabled == true ){
+      sqlContext.sparkContext.listenerBus.addListener(new TestMJoinListener())
       joinAnalyzer.mJoinLogical
+    }
     else
       None
 
@@ -63,7 +65,7 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
 
     lazy val sparkPlan: SparkPlan = {
       SQLContext.setActive(sqlContext)
-      SQLContext.createListenerAndUI(sqlContext.sparkContext)
+      //SQLContext.createListenerAndUI(sqlContext.sparkContext)
       sqlContext.sessionState.planner.plan(ReturnAnswer(optimizedPlan)).next()
     }
 
@@ -80,10 +82,13 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
       case e: Throwable => e.toString
     }
 
+
+
     def simpleString: String = {
       s"""== Physical Plan ==
           |${stringOrError(executedPlan)}
       """.stripMargin.trim
+
     }
 
     override def toString: String =
