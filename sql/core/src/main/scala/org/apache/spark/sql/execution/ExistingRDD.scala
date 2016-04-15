@@ -310,7 +310,7 @@ private[sql] object DataSourceScan {
 private[sql] case class HolderDataSourceScan(child: SparkPlan)
   extends UnaryNode{
 
-  override val output: Seq[Attribute] = Nil
+  override val output: Seq[Attribute] = child.output
   /**
     * Overridden by concrete implementations of SparkPlan.
     * Produces the result of the query as an RDD[InternalRow]
