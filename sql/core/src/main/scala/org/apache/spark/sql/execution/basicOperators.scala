@@ -96,6 +96,19 @@ case class Filter(condition: Expression, child: SparkPlan)
     }
   }
 
+  override def semanticHash : Int ={
+
+    var h = 17
+
+      h = h * 37 + condition.semanticHash
+      h = h * 37 + child.semanticHash
+
+
+
+    h
+
+  }
+
   private[sql] override lazy val metrics = Map(
     "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"))
 

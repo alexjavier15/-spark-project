@@ -279,10 +279,10 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
     // Analyze
     val optimizedPlan = optimizePlans(Seq(dummy_plan)).head
     // Roplace wil holders
-    val holdersReplaced = withHolders(optimizedPlan)
+   // val holdersReplaced = withHolders(optimizedPlan)
     // return the Join root plan (remove filter and projection nodes as they are the same
     // for each subplan
-    findRootJoin(holdersReplaced)
+    findRootJoin(optimizedPlan)
 
   }
 

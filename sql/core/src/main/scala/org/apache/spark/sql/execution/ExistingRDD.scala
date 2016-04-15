@@ -147,6 +147,19 @@ private[sql] case class DataSourceScan(
   }
   }
 
+
+  override def semanticHash : Int ={
+
+    var h = 17
+    output.foreach( o => {
+
+      h = h * 37 + o.semanticHash
+
+    })
+
+    h
+
+  }
   override val nodeName: String = relation.toString
 
   // Ignore rdd when checking results
