@@ -349,11 +349,11 @@ case class CardinalityInfo(plans: Set[SparkPlan], rows: Long) extends Serializab
 }
 object SelectivityPlan {
 
-  val _selectivitypPlanNodes = mutable.HashMap[Int,SelectivityPlan]();
+  val _selectivitypPlanNodes = mutable.HashMap[Int, SelectivityPlan]();
 
-  def apply(sparkPlan : SparkPlan): SelectivityPlan = fromSparkPlan(sparkPlan)
+  def apply(sparkPlan: SparkPlan): SelectivityPlan = fromSparkPlan(sparkPlan)
 
-  private  def splitConjunctivePredicates(condition: Expression): Seq[Expression] = {
+  private def splitConjunctivePredicates(condition: Expression): Seq[Expression] = {
     condition match {
       case And(cond1, cond2) =>
         splitConjunctivePredicates(cond1) ++ splitConjunctivePredicates(cond2)
@@ -362,41 +362,39 @@ object SelectivityPlan {
   }
 
 
-  private [this] def joinSemanticHash( leftHashcode : Int , rightHashCode: Int): Int ={
+  private[this] def joinSemanticHash(leftHashcode: Int, rightHashCode: Int): Int = {
 
-      var h = 17
-      h = h * 37 + leftHashcode + rightHashCode
-      h
+    var h = 17
+    h = h * 37 + leftHashcode + rightHashCode
+    h
   }
 
-def updateFromSelectivityPlan(selPlan : SelectivityPlan): Unit ={
+  def updateFromSelectivityPlan(selPlan: SelectivityPlan): Unit = {
 
-    def updateWith(targetPlan : SelectivityPlan, driverPlan :SelectivityPlan ): Unit ={
+    def updateWith(targetPlan: SelectivityPlan, driverPlan: SelectivityPlan): Unit = {
 
       targetPlan match {
 
-        case hc @ HashCondition(l,r,c,sel,rows,hashCode) =>
-          updateWith(r,driverPlan)
-          updateWith(l,driverPlan)
+        case hc@HashCondition(l, r, c, sel, rows, hashCode) =>
+          updateWith(r, driverPlan)
+          updateWith(l, driverPlan)
 
-        case sc @ ScanCondition(o,f,sel,rows, semanticHash)=>
-            val rightPlan =  driverPlan.asInstanceOf[HashCondition].right
-            val key = joinSemanticHash(semanticHash,rightPlan.semanticHash)
-            val selectivityPlan = _selectivitypPlanNodes.get(key)
-              if(selectivityPlan.isDefined)
-                selectivityPlan.get.setRows(driverPlan.rows)
+        case sc@ScanCondition(o, f, sel, rows, semanticHash) =>
+          val rightPlan = driverPlan.asInstanceOf[HashCondition].right
+          val key = joinSemanticHash(semanticHash, rightPlan.semanticHash)
+          val selectivityPlan = _selectivitypPlanNodes.get(key)
+          if (selectivityPlan.isDefined)
+            selectivityPlan.get.setRows(driverPlan.rows)
 
       }
     }
 
     selPlan match {
 
-      case hc @ HashCondition(l,r,c,sel,rows,hashCode) => updateWith(l,selPlan)
+      case hc@HashCondition(l, r, c, sel, rows, hashCode) => updateWith(l, selPlan)
       case _ => Unit
 
     }
-
-
 
 
   }
@@ -404,31 +402,30 @@ def updateFromSelectivityPlan(selPlan : SelectivityPlan): Unit ={
 
   private[this] def fromSparkPlan(sparkPlan: SparkPlan): SelectivityPlan = {
 
-    val node = sparkPlan match {
+    sparkPlan match {
       case join: HashJoin =>
         val semanticHashCode = join.semanticHash
-        _selectivitypPlanNodes.getOrElseUpdate(hashCode, {
+        _selectivitypPlanNodes.getOrElseUpdate(semanticHashCode, {
           val otherConditions = join.condition.map(splitConjunctivePredicates).getOrElse(Nil)
-          val res = HashCondition(fromSparkPlan(join.left),
+          HashCondition(fromSparkPlan(join.left),
             fromSparkPlan(join.right),
             ((join.leftKeys zip join.rightKeys).map { case (l, r) => EqualTo(l, r) }
               ++ otherConditions).reduceLeftOption(And).getOrElse(throw new IllegalArgumentException(" Can not " +
               "get hash condition")), 0, 1, semanticHashCode)
-          res
         })
 
       case u: UnaryNode => u match {
         case p@Project(_, child) => fromSparkPlan(child)
         case f@Filter(condition, child@DataSourceScan(outputset, _, _, _)) =>
           val semanticHashCode = f.semanticHash
-          _selectivitypPlanNodes.getOrElseUpdate(hashCode, {
+          _selectivitypPlanNodes.getOrElseUpdate(semanticHashCode, {
             ScanCondition(outputset, Some(condition), f.selectivity(), f.getOutputRows, f.semanticHash)
           })
         case f@Filter(condition,
         child@HolderDataSourceScan(child0@DataSourceScan(outputset, _, _, _))) =>
           //TO-DO
           val semanticHashCode = f.semanticHash
-          _selectivitypPlanNodes.getOrElseUpdate(hashCode, {
+          _selectivitypPlanNodes.getOrElseUpdate(semanticHashCode, {
             ScanCondition(outputset, Some(condition), f.selectivity(), f.getOutputRows, f.semanticHash)
           })
 
@@ -439,11 +436,8 @@ def updateFromSelectivityPlan(selPlan : SelectivityPlan): Unit ={
 
 
     }
-    if (node != null) {
-      node.setSelectivity(sparkPlan.selectivity())
-      node.setRows(sparkPlan.getOutputRows)
-    }
-    node
+
+
   }
 
 }
@@ -505,7 +499,7 @@ case class ScanCondition( outputSet : Seq[Attribute],
                           filter : Option[Expression] = None,
                           selectivity0 : Double,
                           rows0 : Long,
-                          semanticHash: Int) extends SelectivityPlan{
+                          override val semanticHash: Int) extends SelectivityPlan{
 
   override val shortName: String = "scanCondition"
   setSelectivity(selectivity0)
@@ -552,7 +546,7 @@ case class HashCondition(left : SelectivityPlan,
                          condition : Expression,
                          selectivity0 : Double,
                          rows0 : Long,
-                         semanticHash : Int) extends SelectivityPlan{
+                         override val  semanticHash : Int) extends SelectivityPlan{
 
 
   override val shortName: String = "hashCondition"
