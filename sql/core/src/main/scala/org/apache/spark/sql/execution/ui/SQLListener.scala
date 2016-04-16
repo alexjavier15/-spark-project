@@ -18,12 +18,11 @@
 package org.apache.spark.sql.execution.ui
 
 import scala.collection.mutable
-
-import org.apache.spark.{JobExecutionStatus, SparkConf}
+import org.apache.spark.{JobExecutionStatus, SparkConf, SparkContext}
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.internal.Logging
 import org.apache.spark.scheduler._
-import org.apache.spark.sql.execution.{SparkPlanInfo, SQLExecution}
+import org.apache.spark.sql.execution.{SQLExecution, SparkPlanInfo}
 import org.apache.spark.sql.execution.metric._
 import org.apache.spark.ui.SparkUI
 
@@ -133,7 +132,7 @@ private[sql] class SQLListener(conf: SparkConf) extends SparkListener with Loggi
         // We are the last job of this execution, so mark the execution as finished. Note that
         // `onExecutionEnd` also does this, but currently that can be called before `onJobEnd`
         // since these are called on different threads.
-        markExecutionFinished(executionId)
+              markExecutionFinished(executionId)
       }
     }
   }
@@ -222,6 +221,7 @@ private[sql] class SQLListener(conf: SparkConf) extends SparkListener with Loggi
       val sqlPlanMetrics = physicalPlanGraph.allNodes.flatMap { node =>
         node.metrics.map(metric => metric.accumulatorId -> metric)
       }
+
       val executionUIData = new SQLExecutionUIData(
         executionId,
         description,
@@ -240,6 +240,7 @@ private[sql] class SQLListener(conf: SparkConf) extends SparkListener with Loggi
         if (!executionUIData.hasRunningJobs) {
           // onExecutionEnd happens after all "onJobEnd"s
           // So we should update the execution lists.
+
           markExecutionFinished(executionId)
         } else {
           // There are some running jobs, onExecutionEnd happens before some "onJobEnd"s.
@@ -346,14 +347,17 @@ private[spark] class SQLHistoryListener(conf: SparkConf, sparkUI: SparkUI)
       finishTask = true)
   }
 
-  override def onOtherEvent(event: SparkListenerEvent): Unit = event match {
-    case _: SparkListenerSQLExecutionStart =>
-      if (!sqlTabAttached) {
-        new SQLTab(this, sparkUI)
-        sqlTabAttached = true
-      }
-      super.onOtherEvent(event)
-    case _ => super.onOtherEvent(event)
+  override def onOtherEvent(event: SparkListenerEvent): Unit = {
+
+    event match {
+      case _: SparkListenerSQLExecutionStart =>
+        if (!sqlTabAttached) {
+          new SQLTab(this, sparkUI)
+          sqlTabAttached = true
+        }
+        super.onOtherEvent(event)
+      case _ => super.onOtherEvent(event)
+    }
   }
 }
 
@@ -390,6 +394,7 @@ private[ui] class SQLExecutionUIData(
 
   def failedJobs: Seq[Long] =
     jobs.filter { case (_, status) => status == JobExecutionStatus.FAILED }.keys.toSeq
+
 }
 
 /**

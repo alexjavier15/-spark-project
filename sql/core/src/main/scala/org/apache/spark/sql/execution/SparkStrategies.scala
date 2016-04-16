@@ -21,7 +21,7 @@ import org.apache.spark.sql.Strategy
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
-import org.apache.spark.sql.catalyst.planning._
+import org.apache.spark.sql.catalyst.planning.{GenericStrategy, _}
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.logical.{BroadcastHint, LogicalPlan}
 import org.apache.spark.sql.catalyst.plans.physical._
@@ -148,8 +148,19 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           leftKeys, rightKeys, Inner, BuildLeft, condition, planLater(left), planLater(right)))
 
       case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
+      if(conf.iteratedHashJoinEnabled) =>
+        val buildSide = BuildRight
+         /* if (right.statistics.sizeInBytes <= left.statistics.sizeInBytes) {
+            BuildRight
+          } else {
+            BuildLeft
+          }*/
+        Seq(joins.IteratedHashJoin(
+          leftKeys, rightKeys, Inner, buildSide, condition, planLater(left), planLater(right)))
+
+      case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
         if !conf.preferSortMergeJoin && shouldShuffleHashJoin(left, right) ||
-          !RowOrdering.isOrderable(leftKeys) =>
+          !RowOrdering.isOrderable(leftKeys) || conf.mJoinEnabled =>
         val buildSide =
           if (right.statistics.sizeInBytes <= left.statistics.sizeInBytes) {
             BuildRight
@@ -267,7 +278,7 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         }
 
         val aggregateOperator =
-          if (aggregateExpressions.map(_.aggregateFunction).exists(!_.supportsPartial)) {
+          if (aggregateExpressions.map(_.aggregateFunction).exists(!_.supportsPartial)  ) {
             if (functionsWithDistinct.nonEmpty) {
               sys.error("Distinct columns cannot exist in Aggregate operator containing " +
                 "aggregate functions which don't support partial aggregation.")
@@ -299,6 +310,19 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         aggregateOperator
 
       case _ => Nil
+    }
+  }
+
+  object PushDownPartialAggregation extends Strategy {
+    def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
+      case logical.Aggregate( groupingExpressions,
+      resultExpressions,
+      l @ logical.MJoin(child, chunkedChild, baseRelations, subplans)
+      ) =>  planLater( logical.MJoin(child,
+        chunkedChild.map(child=> plan.withNewChildren(Seq(child))), baseRelations, subplans)) ::Nil
+      case _ => Nil
+
+
     }
   }
 
@@ -466,11 +490,13 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
 
   object MJoin extends Strategy {
     def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
-      case logical.MJoin(child, baseRelations, subplans) =>
+      case logical.MJoin(child, chunkedChild, baseRelations, subplans) =>
         joins.BroadcastMJoin(
           planLater(child),
-          baseRelations.map(planLater(_)),
-          Some(subplans.getOrElse(Seq()).map(planLater(_)))):: Nil
+          //chunkedChild,
+          chunkedChild.map(plan => planLater(plan)),
+          baseRelations.map( plan => planLater(plan._1)),
+          Some(subplans.getOrElse(Seq()).map(planLater(_))))::Nil
       case _ => Nil
     }
   }

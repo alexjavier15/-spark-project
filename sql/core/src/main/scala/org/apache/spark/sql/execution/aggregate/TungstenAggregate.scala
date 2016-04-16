@@ -83,7 +83,6 @@ case class TungstenAggregate(
     val numOutputRows = longMetric("numOutputRows")
     val dataSize = longMetric("dataSize")
     val spillSize = longMetric("spillSize")
-
     child.execute().mapPartitions { iter =>
 
       val hasInput = iter.hasNext

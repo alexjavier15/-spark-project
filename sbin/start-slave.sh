@@ -31,8 +31,10 @@
 #                           worker.  Subsequent workers will increment this
 #                           number.  Default is 8081.
 
+
 if [ -z "${SPARK_HOME}" ]; then
   export SPARK_HOME="$(cd "`dirname "$0"`"/..; pwd)"
+  echo "$SPARK_HOME"
 fi
 
 # NOTE: This exact class name is matched downstream by SparkSubmit.

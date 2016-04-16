@@ -20,6 +20,7 @@ import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeMap, AttributeReference}
 import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan, Statistics}
+import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 import org.apache.spark.sql.sources.BaseRelation
 
 /**
@@ -37,17 +38,22 @@ case class LogicalRelation(
 
   override val output: Seq[AttributeReference] = {
     val attrs = relation.schema.toAttributes
+
     expectedOutputAttributes.map { expectedAttrs =>
       assert(expectedAttrs.length == attrs.length)
+
       attrs.zip(expectedAttrs).map {
         // We should respect the attribute names provided by base relation and only use the
         // exprId in `expectedOutputAttributes`.
         // The reason is that, some relations(like parquet) will reconcile attribute names to
         // workaround case insensitivity issue.
-        case (attr, expected) => attr.withExprId(expected.exprId)
+        case (attr, expected) =>
+
+          attr.withExprId(expected.exprId)
       }
+
     }.getOrElse(attrs)
-  }
+}
 
   // Logical Relations are distinct if they have different output for the sake of transformations.
   override def equals(other: Any): Boolean = other match {

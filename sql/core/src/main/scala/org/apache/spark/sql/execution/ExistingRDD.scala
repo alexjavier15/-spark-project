@@ -130,6 +130,36 @@ private[sql] case class DataSourceScan(
     override val metadata: Map[String, String] = Map.empty)
   extends LeafNode with CodegenSupport {
 
+
+  val hashcode : Int = relation.hashCode
+
+  println("Initiating datasource scan for _" + this + " hashcode :" + hashcode)
+
+  override def hashCode(): Int = hashcode
+
+  override def equals(o: Any): Boolean = {
+    o match {
+    case o: DataSourceScan => {
+      println("Calling equal for " + this.hashcode + " hashcode :" + hashcode)
+
+      hashcode.equals(o.hashcode)}
+    case _ => false
+  }
+  }
+
+
+  override def semanticHash : Int ={
+
+    var h = 17
+    output.foreach( o => {
+
+      h = h * 37 + o.semanticHash
+
+    })
+
+    h
+
+  }
   override val nodeName: String = relation.toString
 
   // Ignore rdd when checking results
@@ -137,6 +167,8 @@ private[sql] case class DataSourceScan(
     case other: DataSourceScan => relation == other.relation && metadata == other.metadata
     case _ => false
   }
+
+
 
   private[sql] override lazy val metrics = Map(
     "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"))
@@ -285,4 +317,17 @@ private[sql] object DataSourceScan {
   // Metadata keys
   val INPUT_PATHS = "InputPaths"
   val PUSHED_FILTERS = "PushedFilters"
+}
+
+/** Dummy plan node for scanning data from a holder relation. */
+private[sql] case class HolderDataSourceScan(child: SparkPlan)
+  extends UnaryNode{
+
+  override val output: Seq[Attribute] = child.output
+  /**
+    * Overridden by concrete implementations of SparkPlan.
+    * Produces the result of the query as an RDD[InternalRow]
+    */
+  override protected def doExecute(): RDD[InternalRow] =  throw new UnsupportedOperationException("HolderDataSourceScan" +
+    "does not support the execute() code path. it should be replace with the corresponding DataSourceScan ")
 }

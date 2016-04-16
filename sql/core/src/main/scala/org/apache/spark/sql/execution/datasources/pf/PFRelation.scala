@@ -7,11 +7,12 @@ import org.apache.spark.SparkContext
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.execution.datasources.BucketSpec
-import org.apache.spark.sql.sources.{FileCatalog, FileFormat, HadoopFsRelation}
+import org.apache.spark.sql.sources.{HadoopFsRelation, PFileCatalog}
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.json4s.DefaultFormats
 import org.json4s.jackson.JsonMethods._
 
+import scala.collection.mutable
 import scala.io.BufferedSource
 import scala.io.Source._
 
@@ -19,38 +20,65 @@ import scala.io.Source._
   * Created by alex on 18.03.16.
   */
 
-class PFRelation(sqlContext: SQLContext,
-                 location: FileCatalog,
-                 partitionSchema: StructType,
-                 dataSchema: StructType,
-                 bucketSpec: Option[BucketSpec],
-                 fileFormat: FileFormat,
-                 options: Map[String, String]) extends
-  HadoopFsRelation(sqlContext: SQLContext,
-    location: FileCatalog,
-    partitionSchema: StructType,
-    dataSchema: StructType,
-    bucketSpec: Option[BucketSpec],
-    fileFormat: FileFormat,
-    options: Map[String, String]) {
+class HadoopPfRelation(override val sqlContext: SQLContext,
+                            pFLocation: PFileCatalog,
+                            partitionSchema: StructType,
+                            dataSchema: StructType,
+                            bucketSpec: Option[BucketSpec],
+                       override val fileFormat: DefaultSource,
+                            options: Map[String, String],
+                            val pFileDesc : PFileDesc,
+                            parent : HadoopPfRelation = null) extends
+  HadoopFsRelation(sqlContext,
+    pFLocation,
+    partitionSchema,
+    dataSchema,
+    bucketSpec,
+    fileFormat,
+    options) with Serializable{
 
+  def hasParent : Boolean = parent!=null
+//  println("Initiating HaddopPfRelation for _" + this + " hashcode :" + this.hashCode)
+
+  def isChild(relation : HadoopPfRelation): Boolean = hasParent && parent == relation
+  def  splitHadoopPfRelation(): Seq[HadoopPfRelation] = {
+
+     pFLocation.splitPFileCatalog().map(fc =>
+       new HadoopPfRelation(sqlContext ,fc,partitionSchema,dataSchema,bucketSpec,fileFormat,options,pFileDesc, this))
+
+  }
+
+
+  override def hashCode(): Int = pFileDesc.hashCode()+location.hashCode()
+
+  override def equals(o: scala.Any): Boolean = {
+    o match{
+    case h : HadoopPfRelation if  pFileDesc.equals(h.pFileDesc) &&
+      pFLocation.equals(h.location) => true
+    case _ => false
+
+  }}
+
+  override val schema: StructType = {if (hasParent) {
+    println("returning parent schema ");parent.schema} else dataSchema}
 
   /*val fileDesc = PFRelation.readPFileInfo(location.paths.head.getName)
 
 
-  override  val paths = fileDesc.chunkPFArray.map(chunk  => "file:"+chunk.data_location)
+    override  val paths = fileDesc.chunkPFArray.map(chunk  => "file:"+chunk.data_location)
 
-  override  lazy val dataSchema: StructType = maybeDataSchema match {
-    case Some(structType) => structType
-    case None => fileDesc.strucType
-  }
-*/
-
+    override  lazy val dataSchema: StructType = maybeDataSchema match {
+      case Some(structType) => structType
+      case None => fileDesc.strucType
+    }
+  */
+  override def toString: String = { super.toString + ", " + pFLocation.toString }
 }
 
 protected[sql] object PFRelation extends Logging {
 
   lazy val sparkContext = SparkContext.getOrCreate()
+  private var _dataSources = mutable.Set[HadoopPfRelation]()
   val CHUNK_NUM = "ChunkNumber"
   val CHUNK_RECORDS = "ChunkRecords"
   val GET_CHUNK = "GET:"
@@ -183,7 +211,7 @@ case class PFileDesc(file_name: String,
     println(chunkDesc)
     chunkDesc
   })
-  implicit val formats = DefaultFormats
+  implicit val formats = new Serializable {DefaultFormats}
   val structType: Option[StructType] = DataType.fromJson(fromFile(schema_location).getLines.reduce(_ + _)) match {
     case e: StructType => Some(e)
     case _ => None
@@ -206,3 +234,4 @@ case class PFileDesc(file_name: String,
     chunk_locations.map(v => v.toString + System.lineSeparator).reduce(_ + _) + " ])"
 
 }
+

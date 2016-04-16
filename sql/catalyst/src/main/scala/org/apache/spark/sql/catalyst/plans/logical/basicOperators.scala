@@ -17,8 +17,9 @@
 
 package org.apache.spark.sql.catalyst.plans.logical
 
-import scala.collection.mutable.ArrayBuffer
+import org.apache.spark.broadcast.Broadcast
 
+import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
@@ -689,11 +690,11 @@ case object OneRowRelation extends LeafNode {
 }
 
 case class MJoin(child : LogicalPlan ,
-                 leaves : Seq[LogicalPlan] ,
+                 chunkedChild:  Seq[LogicalPlan],
+                 leaves : Seq[ (LogicalPlan,Seq[LogicalPlan] )] ,
                  others: Option[Seq[LogicalPlan] ]) extends UnaryNode{
 
 
   override def output: Seq[Attribute] = child.output
 
-  override def children: Seq[LogicalPlan] = others.getOrElse(Seq(child))
 }

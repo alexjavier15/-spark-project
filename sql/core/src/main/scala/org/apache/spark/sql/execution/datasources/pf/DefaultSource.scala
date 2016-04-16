@@ -41,7 +41,7 @@ import scala.io.BufferedSource
 
 
 
-class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.DefaultSource with DataSourceRegister {
+class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.DefaultSource with DataSourceRegister with Serializable {
 
 
   override def shortName(): String = "pf"
@@ -74,6 +74,7 @@ class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.Defau
       partitionColumns,
       parameters)(sqlContext)
   }*/
+
   override def buildInternalScan(sqlContext: SQLContext, dataSchema: StructType,
                                  requiredColumns: Array[String], filters: Array[Filter],
                                  bucketSet: Option[BitSet], inputFiles: Seq[FileStatus]
@@ -81,28 +82,18 @@ class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.Defau
                                  options: Map[String, String]): RDD[InternalRow] = {
 
 
+    buildInternalScan(sqlContext,dataSchema,requiredColumns,filters,bucketSet,inputFiles,broadcastedConf,options)
+  }
 
+  def buildInternalScan(sqlContext: SQLContext, dataSchema: StructType,
+                                 requiredColumns: Array[String], filters: Array[Filter],
+                                 bucketSet: Option[BitSet], inputFiles: Seq[FileStatus]
+                                 , broadcastedConf: Broadcast[SerializableConfiguration],
+                                 options: Map[String, String], relation : HadoopPfRelation  = null): RDD[InternalRow] = {
 
-    val pfFiles = inputFiles.filterNot(_.getPath.getName startsWith "_")
+    println("Building Scan for : "+ relation.location.allFiles().mkString(","))
 
-
-    val pathsString = inputFiles.map(_.getPath.toUri.toString)
-    val header = dataSchema.fields.map(_.name)
-
-
-    val  reply = PFRelation.executeCommand(NEXT_CHUNK+pfFiles.head)
-
-
-    val  newFileStatus = reply.flatMap { path =>
-      val hdfsPath = new Path(path)
-      val fs = hdfsPath.getFileSystem(sqlContext.sparkContext.hadoopConfiguration)
-      val qualified = hdfsPath.makeQualified(fs.getUri, fs.getWorkingDirectory)
-      SparkHadoopUtil.get.globPathIfNecessary(qualified)
-    }.toArray
-    val fileCatalog: FileCatalog =
-      new HDFSFileCatalog(sqlContext, options, newFileStatus,None)
-
-    super.buildInternalScan(sqlContext,dataSchema,requiredColumns,filters,bucketSet,fileCatalog.allFiles(),broadcastedConf,options)
+    super.buildInternalScan(sqlContext,dataSchema,requiredColumns,filters,bucketSet,relation.location.allFiles(),broadcastedConf,options)
 
   }
 
@@ -116,8 +107,7 @@ class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.Defau
 
     val path = files.filterNot(_.getPath.getName startsWith "_").map(_.getPath.toString).head
 
-    val fileDesc = PFRelation.extractPFMetadata[PFileDesc](path)
-    return fileDesc.structType
+     PFRelation.extractPFMetadata[PFileDesc](path).structType
 
   }
 
@@ -128,3 +118,4 @@ class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.Defau
     */
   override def prepareWrite(sqlContext: SQLContext, job: Job, options: Map[String, String], dataSchema: StructType): OutputWriterFactory = null
 }
+

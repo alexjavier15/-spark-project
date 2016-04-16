@@ -19,6 +19,7 @@ out/
 .DS_Store
 build/apache-maven*
 build/zinc*
+bin/*
 build/scala*
 conf/spark-env.sh.template
 conf/java-opts
@@ -76,4 +77,7 @@ sql/hive-thriftserver/test_warehouses
 # For R session data
 .RHistory
 .RData
-
+*/*/*/test/*
+*/*/src/test/*
+*/src/test/*
+yarn/src/test/*

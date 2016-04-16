@@ -100,7 +100,7 @@ class EquivalencesClass {
           case _ => false
 
         })
-        // Create a new condition if not condition found so far
+        // Create a new condition if no condition is  found so far
         if (derivedCond.isEmpty) {
 
           val newCond = EqualTo(leftAttr, rightAttr).withNewChildren(Seq(leftAttr, rightAttr))

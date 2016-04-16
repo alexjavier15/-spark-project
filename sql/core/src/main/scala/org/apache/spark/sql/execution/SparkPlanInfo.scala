@@ -19,7 +19,7 @@ package org.apache.spark.sql.execution
 
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.sql.execution.exchange.ReusedExchange
-import org.apache.spark.sql.execution.metric.SQLMetricInfo
+import org.apache.spark.sql.execution.metric.{SQLMetricInfo, SQLMetrics}
 import org.apache.spark.util.Utils
 
 /**
@@ -45,6 +45,8 @@ class SparkPlanInfo(
       nodeName == o.nodeName && simpleString == o.simpleString && children == o.children
     case _ => false
   }
+
+
 }
 
 private[sql] object SparkPlanInfo {

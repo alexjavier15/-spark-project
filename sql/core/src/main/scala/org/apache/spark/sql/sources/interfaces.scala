@@ -538,6 +538,7 @@ class HDFSFileCatalog(
   var leafDirToChildrenFiles = mutable.Map.empty[Path, Array[FileStatus]]
   var cachedPartitionSpec: PartitionSpec = _
 
+
   def partitionSpec(): PartitionSpec = {
     if (cachedPartitionSpec == null) {
       cachedPartitionSpec = inferPartitioning(partitionSchema)
@@ -707,16 +708,23 @@ class HDFSFileCatalog(
 }
 
 class PFileCatalog(
-                    sqlContext: SQLContext,
-                    parameters: Map[String, String],
-                    paths: Seq[Path],
-                    partitionSchema: Option[StructType],
+                    override val sqlContext: SQLContext,
+                    override val parameters: Map[String, String],
+                    override val paths: Seq[Path],
+                    override val partitionSchema: Option[StructType],
                     val pfFileDesc : PFileDesc)
-  extends HDFSFileCatalog(sqlContext,parameters, paths,partitionSchema ){
+  extends HDFSFileCatalog(sqlContext,parameters, paths,partitionSchema ) {
+
+
+  def splitPFileCatalog() : Seq[PFileCatalog] = {
+
+    paths.map(path => new PFileCatalog(sqlContext , parameters,Seq(path),partitionSchema,pfFileDesc))
+
+  }
 
 
 
-
+  override def toString: String = { paths.mkString(",")}
 }
 
 /**

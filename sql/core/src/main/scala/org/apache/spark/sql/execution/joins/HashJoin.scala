@@ -38,6 +38,8 @@ trait HashJoin {
   val left: SparkPlan
   val right: SparkPlan
 
+
+
   override def output: Seq[Attribute] = {
     joinType match {
       case Inner =>
@@ -62,6 +64,8 @@ trait HashJoin {
     case BuildLeft => (leftKeys, rightKeys)
     case BuildRight => (rightKeys, leftKeys)
   }
+
+  override def planCost(): Long =    streamedPlan.planCost() + streamedPlan.getOutputRows
 
   /**
     * Try to rewrite the key as LongType so we can use getLong(), if they key can fit with a long.
@@ -125,10 +129,13 @@ trait HashJoin {
   protected def createResultProjection: (InternalRow) => InternalRow =
     UnsafeProjection.create(self.schema)
 
+
   protected def hashJoin(
       streamIter: Iterator[InternalRow],
       hashedRelation: HashedRelation,
-      numOutputRows: LongSQLMetric): Iterator[InternalRow] = {
+      numOutputRows: LongSQLMetric,
+      numStreamedMatchedRows: Option[LongSQLMetric] = None,
+      numHashedMatchedRows: Option[LongSQLMetric] = None): Iterator[InternalRow] = {
     new Iterator[InternalRow] {
       private[this] var currentStreamedRow: InternalRow = _
       private[this] var currentHashMatches: Seq[InternalRow] = _
@@ -139,6 +146,12 @@ trait HashJoin {
       private[this] val resultProjection = createResultProjection
 
       private[this] val joinKeys = streamSideKeyGenerator
+      private[this] var streamedChanged = false
+      private[this] var hashedChanged = false
+      private[this] def  updateMetric(metric : Option[LongSQLMetric] , value : Int):Unit ={
+        if(metric.isDefined)
+          metric.get += value
+      }
 
       override final def hasNext: Boolean = {
         while (true) {
@@ -146,22 +159,26 @@ trait HashJoin {
           if (currentHashMatches != null && currentMatchPosition == currentHashMatches.length) {
             currentHashMatches = null
             currentMatchPosition = -1
+            hashedChanged=true
           }
 
           // find the next match
           while (currentHashMatches == null && streamIter.hasNext) {
             currentStreamedRow = streamIter.next()
+            streamedChanged=true
             val key = joinKeys(currentStreamedRow)
             if (!key.anyNull) {
               currentHashMatches = hashedRelation.get(key)
               if (currentHashMatches != null) {
                 currentMatchPosition = 0
+                hashedChanged=true
               }
             }
           }
-          if (currentHashMatches == null) {
+
+          if (currentHashMatches == null)
             return false
-          }
+
 
           // found some matches
           buildSide match {
@@ -169,11 +186,19 @@ trait HashJoin {
             case BuildLeft => joinRow(currentHashMatches(currentMatchPosition), currentStreamedRow)
           }
           if (boundCondition(joinRow)) {
+            if(streamedChanged)
+              updateMetric(numStreamedMatchedRows,1)
+            streamedChanged=false
+            if(hashedChanged)
+              updateMetric(numHashedMatchedRows,1)
+            hashedChanged=false
             return true
           } else {
             currentMatchPosition += 1
+            hashedChanged=true
           }
         }
+
         false  // unreachable
       }
 
@@ -181,6 +206,7 @@ trait HashJoin {
         // next() could be called without calling hasNext()
         if (hasNext) {
           currentMatchPosition += 1
+          hashedChanged=true
           numOutputRows += 1
           resultProjection(joinRow)
         } else {
@@ -276,3 +302,4 @@ trait HashJoin {
     }
   }
 }
+

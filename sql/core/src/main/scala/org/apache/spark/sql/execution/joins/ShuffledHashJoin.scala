@@ -52,12 +52,11 @@ case class ShuffledHashJoin(
       throw new IllegalArgumentException(s"ShuffledHashJoin should not take $x as the JoinType")
   }
 
-  override def requiredChildDistribution: Seq[Distribution] =
+  override def requiredChildDistribution: Seq[Distribution] = //UnspecifiedDistribution :: UnspecifiedDistribution :: Nil
     ClusteredDistribution(leftKeys) :: ClusteredDistribution(rightKeys) :: Nil
 
   protected override def doExecute(): RDD[InternalRow] = {
     val numOutputRows = longMetric("numOutputRows")
-
     streamedPlan.execute().zipPartitions(buildPlan.execute()) { (streamIter, buildIter) =>
       val hashed = HashedRelation(buildIter.map(_.copy()), buildSideKeyGenerator)
       val joinedRow = new JoinedRow

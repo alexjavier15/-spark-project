@@ -49,6 +49,10 @@ private[execution] sealed trait HashedRelation {
     throw new UnsupportedOperationException
   }
 
+  def buildIterator : Iterator[InternalRow] = {
+
+    throw new UnsupportedOperationException
+  }
   /**
     * Returns the size of used memory.
     */

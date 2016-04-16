@@ -19,12 +19,12 @@ package org.apache.spark.sql.execution.exchange
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
-
 import org.apache.spark.broadcast
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.execution.{LeafNode, SparkPlan, UnaryNode}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.StructType
@@ -38,6 +38,7 @@ import org.apache.spark.sql.types.StructType
  */
 abstract class Exchange extends UnaryNode {
   override def output: Seq[Attribute] = child.output
+
 }
 
 /**

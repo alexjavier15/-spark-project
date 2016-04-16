@@ -20,7 +20,6 @@ package org.apache.spark.sql.catalyst.analysis
 import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.JavaConverters._
-
 import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.{CatalystConf, EmptyConf, TableIdentifier}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, SubqueryAlias}
@@ -36,6 +35,8 @@ trait Catalog {
   def tableExists(tableIdent: TableIdentifier): Boolean
 
   def lookupRelation(tableIdent: TableIdentifier, alias: Option[String] = None): LogicalPlan
+
+  def lookupIdentifier(plan :LogicalPlan): TableIdentifier
 
   def setCurrentDatabase(databaseName: String): Unit = {
     throw new UnsupportedOperationException
@@ -76,22 +77,28 @@ trait Catalog {
 
 class SimpleCatalog(val conf: CatalystConf) extends Catalog {
   private[this] val tables = new ConcurrentHashMap[String, LogicalPlan]
+  private[this] val tableIdentifiers = new ConcurrentHashMap[LogicalPlan, TableIdentifier]
 
   override def registerTable(tableIdent: TableIdentifier, plan: LogicalPlan): Unit = {
     tables.put(getTableName(tableIdent), plan)
+    tableIdentifiers.put(plan,tableIdent)
   }
 
   override def unregisterTable(tableIdent: TableIdentifier): Unit = {
     tables.remove(getTableName(tableIdent))
+    tableIdentifiers.remove(tables.get(getTableName(tableIdent)))
   }
 
   override def unregisterAllTables(): Unit = {
     tables.clear()
+    tableIdentifiers.clear()
   }
 
   override def tableExists(tableIdent: TableIdentifier): Boolean = {
     tables.containsKey(getTableName(tableIdent))
   }
+
+  override def lookupIdentifier(plan: LogicalPlan): TableIdentifier = tableIdentifiers.get(plan)
 
   override def lookupRelation(
       tableIdent: TableIdentifier,
@@ -193,6 +200,10 @@ object EmptyCatalog extends Catalog {
   override def lookupRelation(
       tableIdent: TableIdentifier,
       alias: Option[String] = None): LogicalPlan = {
+    throw new UnsupportedOperationException
+  }
+
+  override def lookupIdentifier(plan: LogicalPlan): TableIdentifier = {
     throw new UnsupportedOperationException
   }
 

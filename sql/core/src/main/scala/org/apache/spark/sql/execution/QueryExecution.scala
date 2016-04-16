@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.execution
 
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{RDD, UnionRDD}
 import org.apache.spark.sql.{AnalysisException, SQLContext}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReturnAnswer}
@@ -45,8 +45,10 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
   }
   lazy val joinAnalyzer = new JoinAnalyzer(withCachedData,sqlContext)
   lazy val mJoinPlan : Option[LogicalPlan] = {
-    if(sqlContext.conf.mJoinEnabled == true )
+    if(sqlContext.conf.mJoinEnabled == true ){
+      sqlContext.sparkContext.listenerBus.addListener(new TestMJoinListener())
       joinAnalyzer.mJoinLogical
+    }
     else
       None
 
@@ -63,6 +65,7 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
 
     lazy val sparkPlan: SparkPlan = {
       SQLContext.setActive(sqlContext)
+      //SQLContext.createListenerAndUI(sqlContext.sparkContext)
       sqlContext.sessionState.planner.plan(ReturnAnswer(optimizedPlan)).next()
     }
 
@@ -71,6 +74,7 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
     lazy val executedPlan: SparkPlan = sqlContext.sessionState.prepareForExecution.execute(sparkPlan)
 
     /** Internal version of the RDD. Avoids copies and has no schema */
+     // val res = new UnionRDD[InternalRow](sqlContext.sparkContext, Seq(executedPlan.execute(), executedPlan.execute()))
     lazy val toRdd: RDD[InternalRow] = executedPlan.execute()
 
     protected def stringOrError[A](f: => A): String =
@@ -78,10 +82,13 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
       case e: Throwable => e.toString
     }
 
+
+
     def simpleString: String = {
       s"""== Physical Plan ==
           |${stringOrError(executedPlan)}
       """.stripMargin.trim
+
     }
 
     override def toString: String =

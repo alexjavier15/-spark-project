@@ -2008,12 +2008,14 @@ class Dataset[T] private[sql](
   private def collect(needCallback: Boolean): Array[T] = {
     def execute(): Array[T] = withNewExecutionId {
       queryExecution.executedPlan.executeCollect().map(boundTEncoder.fromRow)
+
     }
 
     if (needCallback) {
       withCallback("collect", toDF())(_ => execute())
     } else {
       execute()
+
     }
   }
 

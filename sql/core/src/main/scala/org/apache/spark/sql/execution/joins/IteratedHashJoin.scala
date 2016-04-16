@@ -17,16 +17,16 @@
 
 package org.apache.spark.sql.execution.joins
 
-import org.apache.spark.TaskContext
+import org.apache.spark.{ SparkEnv, TaskContext}
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode, GenerateUnsafeProjection}
 import org.apache.spark.sql.catalyst.plans._
-import org.apache.spark.sql.catalyst.plans.physical.{BroadcastDistribution, Distribution, Partitioning, UnspecifiedDistribution}
-import org.apache.spark.sql.execution.{SparkPlan, _}
+import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.sql.execution.metric.SQLMetrics
+import org.apache.spark.sql.execution.{SparkPlan, _}
 import org.apache.spark.util.collection.CompactBuffer
 
 /**
@@ -35,7 +35,7 @@ import org.apache.spark.util.collection.CompactBuffer
  * broadcasted relation.  This data is then placed in a Spark broadcast variable.  The streamed
  * relation is not shuffled.
  */
-case class BroadcastHashJoin(
+case class IteratedHashJoin(
     leftKeys: Seq[Expression],
     rightKeys: Seq[Expression],
     joinType: JoinType,
@@ -53,16 +53,9 @@ case class BroadcastHashJoin(
   override def outputPartitioning: Partitioning = streamedPlan.outputPartitioning
 
   override def requiredChildDistribution: Seq[Distribution] = {
-    val mode = HashedRelationBroadcastMode(
-      canJoinKeyFitWithinLong,
-      rewriteKeyExpr(buildKeys),
-      buildPlan.output)
-    buildSide match {
-      case BuildLeft =>
-        BroadcastDistribution(mode) :: UnspecifiedDistribution :: Nil
-      case BuildRight =>
-        UnspecifiedDistribution :: BroadcastDistribution(mode) :: Nil
-    }
+
+     AllTuples::AllTuples::Nil
+
   }
 
   protected override def doExecute(): RDD[InternalRow] = {
@@ -70,40 +63,49 @@ case class BroadcastHashJoin(
     val numStreamedMatchedRows = Option(longMetric("numStreamedMatchedRows"))
     val numHashedMatchedRows = Option(longMetric("numHashedMatchedRows"))
 
-    val broadcastRelation = buildPlan.executeBroadcast[HashedRelation]()
-    val streamed = streamedPlan.execute()
-    streamed.mapPartitions { streamedIter =>
+    val streamed =  streamedPlan.execute()
+    val built = buildPlan.execute()
+    val numPartitions =Math.min( Math.min(streamed.getNumPartitions, built.getNumPartitions) ,2)
+    val mod = numPartitions + 1
+    var shift = 0
+    for ( x <- 0 to numPartitions){
 
-      val joinedRow = new JoinedRow()
-      val hashTable = broadcastRelation.value
-      TaskContext.get().taskMetrics().incPeakExecutionMemory(hashTable.getMemorySize)
-      val keyGenerator = streamSideKeyGenerator
-      val resultProj = createResultProjection
 
+
+    }
+
+    streamedPlan.execute().zipPartitions(buildPlan.execute()) { (streamIter, buildIter) =>
+
+      val hashed = HashedRelation(buildIter.map(_.copy()), buildSideKeyGenerator)
+      val joinedRow = new JoinedRow
       joinType match {
         case Inner =>
-          hashJoin(streamedIter, hashTable, numOutputRows,numStreamedMatchedRows,numHashedMatchedRows)
-
-        case LeftOuter =>
-          streamedIter.flatMap { currentRow =>
-            val rowKey = keyGenerator(currentRow)
-            joinedRow.withLeft(currentRow)
-            leftOuterIterator(rowKey, joinedRow, hashTable.get(rowKey), resultProj, numOutputRows)
-          }
-
-        case RightOuter =>
-          streamedIter.flatMap { currentRow =>
-            val rowKey = keyGenerator(currentRow)
-            joinedRow.withRight(currentRow)
-            rightOuterIterator(rowKey, hashTable.get(rowKey), joinedRow, resultProj, numOutputRows)
-          }
+          hashJoin(streamIter, hashed, numOutputRows, numStreamedMatchedRows,numHashedMatchedRows )
 
         case LeftSemi =>
-          hashSemiJoin(streamedIter, hashTable, numOutputRows)
+          hashSemiJoin(streamIter, hashed, numOutputRows)
+
+        case LeftOuter =>
+          val keyGenerator = streamSideKeyGenerator
+          val resultProj = createResultProjection
+          streamIter.flatMap(currentRow => {
+            val rowKey = keyGenerator(currentRow)
+            joinedRow.withLeft(currentRow)
+            leftOuterIterator(rowKey, joinedRow, hashed.get(rowKey), resultProj, numOutputRows)
+          })
+
+        case RightOuter =>
+          val keyGenerator = streamSideKeyGenerator
+          val resultProj = createResultProjection
+          streamIter.flatMap(currentRow => {
+            val rowKey = keyGenerator(currentRow)
+            joinedRow.withRight(currentRow)
+            rightOuterIterator(rowKey, hashed.get(rowKey), joinedRow, resultProj, numOutputRows)
+          })
 
         case x =>
           throw new IllegalArgumentException(
-            s"BroadcastHashJoin should not take $x as the JoinType")
+            s"ShuffledHashJoin should not take $x as the JoinType")
       }
     }
   }
