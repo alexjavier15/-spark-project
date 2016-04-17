@@ -330,21 +330,24 @@ case class BroadcastMJoin(
 
 }
 
-case class CardinalityInfo(plans: Set[SparkPlan], rows: Long) extends Serializable {
-  override def toString: String = plans.map(plan => plan.nodeName).toString() +
-    "\r\n" + " rows : " + rows
+case class FilterStatInfo( leftAttr : Expression,
+                           rightAttr : Expression,
+                           parent : Option[FilterStatInfo] = None,
+                           equivClass : EquivalencesClass) extends Serializable {
 
-  override def equals(o: scala.Any): Boolean =  o match{
-    case c : CardinalityInfo => plans.equals(c.plans)
-    case _ => false
+  private[this] var selectivity : Double  = 0
+  private[this] val  _derived : mutable.Set[FilterStatInfo] = mutable.Set[FilterStatInfo]()
 
-  }
+  def getSelectivity : Double = selectivity
 
-  override def hashCode(): Int = {
-    plans.map(_.hashCode()).sum
+  def updateSelectivity(
 
-  }
+                       )
 
+
+  def contains(condition : Expression ) : Boolean = conditions.contains(condition)
+
+  def addCondition( condition)
 
 }
 object SelectivityPlan {
@@ -367,6 +370,12 @@ object SelectivityPlan {
     var h = 17
     h = h * 37 + leftHashcode + rightHashCode
     h
+  }
+
+  def updatefromExecution(sparkPlan : SparkPlan) : Unit ={
+
+
+
   }
 
   def updateFromSelectivityPlan(selPlan: SelectivityPlan): Unit = {
@@ -402,7 +411,8 @@ object SelectivityPlan {
 
   private[this] def fromSparkPlan(sparkPlan: SparkPlan): SelectivityPlan = {
 
-    sparkPlan match {
+
+   val node = sparkPlan match {
       case join: HashJoin =>
         val semanticHashCode = join.semanticHash
         _selectivitypPlanNodes.getOrElseUpdate(semanticHashCode, {
@@ -436,7 +446,11 @@ object SelectivityPlan {
 
 
     }
+    if(node !=null) {
+        node.setSelectivity(sparkPlan.selectivity())
+       node.setRows(sparkPlan.getOutputRows)
 
+      }
 
   }
 
@@ -597,20 +611,3 @@ case class HashCondition(left : SelectivityPlan,
 
   override def children: Seq[SelectivityPlan] = Seq(left) ++ Seq(right)
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
