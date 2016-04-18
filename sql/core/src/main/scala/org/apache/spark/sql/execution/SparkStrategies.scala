@@ -495,7 +495,8 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           planLater(child),
           //chunkedChild,
           chunkedChild.map(plan => planLater(plan)),
-          baseRelations.map( plan => planLater(plan._1)),
+          baseRelations.map{ case(relation, chunks) =>
+            planLater(relation).simpleHash-> chunks.map(planLater(_))}.toMap,
           Some(subplans.getOrElse(Seq()).map(planLater(_))))::Nil
       case _ => Nil
     }

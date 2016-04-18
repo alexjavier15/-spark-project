@@ -96,12 +96,12 @@ case class Filter(condition: Expression, child: SparkPlan)
     }
   }
 
-  override def semanticHash : Int ={
+  override def simpleHash : Int ={
 
     var h = 17
 
       h = h * 37 + condition.semanticHash
-      h = h * 37 + child.semanticHash
+      h = h * 37 + child.simpleHash
 
 
 

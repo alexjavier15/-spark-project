@@ -85,10 +85,12 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
 
   }
 
- def semanticHash : Int= {
-   throw new UnsupportedOperationException(s"$nodeName does not implement semanticHash")
+ def simpleHash : Int= {
+   throw new UnsupportedOperationException(s"$nodeName does not implement simpleHash")
  }
-
+  def semanticHash : Int= {
+    throw new UnsupportedOperationException(s"$nodeName does not implement semanticHash")
+  }
 
   def numLeaves : Long = {
     throw new UnsupportedOperationException(s"$nodeName does not implement numLeaves")
@@ -474,7 +476,7 @@ private[sql] trait LeafNode extends SparkPlan {
   override def producedAttributes: AttributeSet = outputSet
   override def planCost(): Long =  getOutputRows
   override def numLeaves: Long = 1L
-
+  override def semanticHash: Int =  simpleHash
 }
 
 private[sql] trait UnaryNode extends SparkPlan {
@@ -489,7 +491,10 @@ private[sql] trait UnaryNode extends SparkPlan {
 
   override def numLeaves: Long = child.numLeaves
 
+  override def simpleHash: Int =  child.simpleHash
+
   override def semanticHash: Int =  child.semanticHash
+
 }
 
 private[sql] trait BinaryNode extends SparkPlan {
@@ -502,11 +507,17 @@ private[sql] trait BinaryNode extends SparkPlan {
 
   override def numLeaves: Long = left.numLeaves + right.numLeaves
 
-  override def semanticHash : Int ={
+  override def simpleHash : Int ={
 
     var h = 17
-    h = h * 37 + left.semanticHash
-    h = h * 37 + right.semanticHash
+    h = h * 37 + left.simpleHash
+    h = h * 37 + right.simpleHash
+    h
+
+  }
+  override def semanticHash: Int = {
+    var h = 17
+    h = h * 37 + left.semanticHash + right.semanticHash
     h
 
   }

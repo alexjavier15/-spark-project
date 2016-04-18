@@ -42,143 +42,60 @@ import scala.collection.mutable
 case class BroadcastMJoin(
                            child: SparkPlan,
                            chunkedchild: Seq[SparkPlan],
-                           baseRelations: Seq[SparkPlan],
+                           baseRelations: Map[Int,Seq[SparkPlan]],
                            subplans: Option[Seq[SparkPlan]]
                          )
   extends UnaryNode {
 
-  private val chunkedSubplans: Seq[Seq[Int]] = makeBucktedSubplans
   private var currentSubplans: Seq[Seq[Int]] = Seq(Seq())
   var key = -1
-  private val _selectivityPlans = mutable.HashSet[SelectivityPlan]()
-  private val _relationLengthToRelations = mutable.HashMap[Long, Set[CardinalityInfo]]()
+  private var _bestPlan = chunkedchild.head
+  private var _pendingSubplans  =initSubplans()
   // Keeps track of all persisted RDDs
+  private val _subplansMap = subplans.getOrElse(Nil).groupBy{
+    subplan => subplan.simpleHash}.map{ case (a,b)=> a -> b.head }
   private[this] val persistentHashTables = {
     val map: ConcurrentMap[Int, broadcast.Broadcast[HashedRelation]] = new MapMaker().
       weakValues().makeMap[Int, broadcast.Broadcast[HashedRelation]]()
     map.asScala
   }
 
-  private[this] def initializeHashTables(): Unit = {
-    baseRelations.
-      map(baseRel => {
-        val idx = baseRelations.indexOf(baseRel)
-        val hashRelation = executeBroadcast[HashedRelation]
-        persistHashTable(idx, hashRelation)
-
-      })
-  }
 
 
- /* private[this] def unifyHashConditions(): Unit = {
-    // Start with the chunked plan ??
-    addConditionsFromPlans(chunkedchild)
-
-    subplans match {
-
-      case Some(list) => addConditionsFromPlans(list)
-      case _ => Unit
-
-    }
-  }*/
-
-//  private[this] def addConditionsFromPlans(plans: Seq[SparkPlan]): Unit =    plans foreach {
-  //    _hashConditions ++= extractHashConditions(_) }
+  private[this] def initSubplans():Iterator[Seq[SparkPlan]] ={
+    /** For each element x in List xss, returns (x, xss - x) */
 
 
- /* private[this] def extractHashConditions(sparkPlan: SparkPlan): Set[HashCondition] = {
+    def combine( chunks: List[Seq[SparkPlan]]): Seq[Seq[SparkPlan]] = {
 
-    sparkPlan match {
-
-      case j: HashJoin => (extractHashConditions(j.left) ++
-        extractHashConditions(j.right)) + HashCondition(j.leftKeys, j.rightKeys)
-      case l: UnaryNode => extractHashConditions(l.child)
-      case _ => Set.empty
-
-    }
-
-
-  }
-*/
-  private[this] def persistHashTable(idx: Int, hashRelation: broadcast.Broadcast[HashedRelation]) {
-    persistentHashTables(idx) = hashRelation
-
-  }
-
-  private[this] def makeBucktedSubplans(): Seq[Seq[Int]] = {
-
-    val metadataList = baseRelations.map(relation => relation match {
-      case Filter(_, d@DataSourceScan(_, rdd, _, metadata)) =>
-        key = rdd.id
-        metadata.get(CHUNK_NUM).getOrElse("1")
-      case _ => "1"
-    }
-    )
-    assert(!metadataList.contains(""))
-    val numChunksPerRel = metadataList.map(_.toInt)
-
-    def permuteWithoutOrdering(seq: Seq[Int]): Seq[Seq[Int]] = {
-      seq match {
-
-        case x :: Nil => Seq.iterate(Seq(1), seq.head)(x => Seq(x.head + 1))
-        case _ =>
-          for (y <- Seq.iterate(1, seq.head)(y => y + 1); x <- permuteWithoutOrdering(seq.tail))
-            yield (y +: x)
+      chunks match {
+        case x :: Nil => x.map(Seq(_))
+        case x :: xs :: Nil =>
+          for (y <- x; ys <- xs)
+            yield Seq(y,ys)
+        case x::xs =>
+          for (y <- x; ys <- combine(xs))
+            yield y+:ys
       }
     }
 
-    val res = permuteWithoutOrdering(numChunksPerRel)
 
-    println(res)
-    res
-  }
+    val res = combine(baseRelations.values.toList)
+    res.foreach{
+      c => println(c.map{ c => c.simpleHash}.mkString(","))
 
-  // def  streamed(start : Int ,iterator : Iterator[Int]) : Stream[(Int, Int)] = (start ,iterator.next())#::streamed(start+1,iterator)
-  def getSubplansForChunk(relIdx: Int, chunkIdx: Int): Seq[Seq[Int]] = {
-    assert(relIdx <= baseRelations.length)
-    val qualified = chunkedSubplans.filter(subplan => subplan(relIdx).equals(chunkIdx))
-    qualified
-  }
-
-  private def chunktoDrop(): (Int, Int) = {
-
-    val allSubplans = currentSubplans
-    //++newSubplans
-
-    val mapped = allSubplans.flatMap(subplan => {
-      val iterator = subplan.toIterator
-      Seq.iterate((1, iterator.next), subplan.length)(x => (x._1 + 1, iterator.next))
-
-    })
-
-    val groupedChunks = mapped.groupBy(x => x)
-    val numSuplansByChunk = groupedChunks.map(chunk => (chunk._1, chunk._2.length))
-
-    numSuplansByChunk.minBy(_._2)._1
-
-    // if there's other criteria jsut add here
-
-
-  }
-
-  private def chunkHasSubplans(relIdx: Int, chunkIdx: Int): Boolean = {
-
-    getSubplansForChunk(relIdx, chunkIdx).nonEmpty
-
-  }
-
-  private def getNextChunk(relIdx: Int): Int = {
-
-
-    val relation = baseRelations(relIdx)
-
-    relation match {
-      //    case DataSourceScan(_, _, fp :  pf.DefaultSource, metadata) =>  fp.getNextChunkID
-      case _ => -1
     }
 
 
+    println("***Chunk subplans***")
+
+    println(res)
+    res.toIterator
+
   }
+
+
+
 
 
   /**
@@ -194,14 +111,20 @@ case class BroadcastMJoin(
 
       subplans.getOrElse(Seq()).foreach( plan => {
         val selPlan = SelectivityPlan(plan)
-       _selectivityPlans+=selPlan
+       SelectivityPlan._selectivityPlanRoots+=(plan.simpleHash->selPlan)
 
       }
 
       )
+    println(_pendingSubplans)
+    println("****Subplans****")
     println(subplans)
-    println(_selectivityPlans)
-
+    println("****Selectivity Plans****")
+    println(SelectivityPlan._selectivityPlanRoots)
+    println("****SelectivityPlan nodes****")
+    println(SelectivityPlan._selectivityPlanNodes)
+    println("****SelectivityPlan filters****")
+    println(SelectivityPlan._filterStats)
 
   }
 
@@ -242,85 +165,66 @@ case class BroadcastMJoin(
         _relationLengthToRelations += (1L -> Set(cardInfo))
 
     })
-*/  val selPlan = SelectivityPlan(sparkPlan)
-    println("****before update***************")
+*/
+    SelectivityPlan.updatefromExecution(sparkPlan)
 
-    println(selPlan)
-    println("****after update***************")
-
-    SelectivityPlan.updateFromSelectivityPlan(selPlan)
-    println(selPlan)
-
-    println("****Update Result***************")
-    println(_selectivityPlans)
-
-
-  }
-
-  private def inferSelectivities(): Unit = {
-    // Do selectivity inference iteratively
-
-    def inferSelectivityFrom(cardInfo: CardinalityInfo, length: Long): Unit = {
-
-      val below = _relationLengthToRelations(length - 1) // only left-deep plans!
-      val outerSubsets  = below.filter( set => set.plans.subsetOf(cardInfo.plans))
-      val innersubsets = outerSubsets.map( outerInfo => cardInfo.plans.diff(outerInfo.plans))
-
-    }
-
-    val max = _relationLengthToRelations.keySet.max
-    (3L to max).foreach(length => {
-
-
-    })
-
+    println("****Selectivity Plans****")
+    println(SelectivityPlan._selectivityPlanRoots)
+    println("****SelectivityPlan nodes****")
+    println(SelectivityPlan._selectivityPlanNodes)
+    println("****SelectivityPlan filters****")
+    println(SelectivityPlan._filterStats)
+    val bestPlan =SelectivityPlan._selectivityPlanRoots.minBy{ case (hc,selPlan) => selPlan.planCost()  }
+    println("****Min  plan****")
+    println(bestPlan)
+    val oldPlan = _bestPlan
+    _bestPlan=_subplansMap.getOrElse(bestPlan._1,oldPlan)
+    println("****New Optimized plan****")
+    println(_bestPlan)
 
   }
+
+
 
   override protected def doExecute(): RDD[InternalRow] = {
-    if (key != -1) {
-      sqlContext.sparkContext.setLocalProperty("chunksFor" + key, "1")
-      println("setting chunks for : " + key)
-    }
 
-    //unifyHashConditions
-    println("********Hash conditions*********")
-
+    val rddBuffer = mutable.ArrayBuffer[RDD[InternalRow]]()
     sqlContext.setConf("spark.sql.mjoin", "false")
-    sparkContext.union(chunkedchild.map(plan => {
-      /*val  metrics = plan.executeBroadcastMetrics()
-       println(metrics.value)
+    while(_pendingSubplans.hasNext){
 
-     val info = SparkPlanInfo.fromSparkPlan(child)
-      println(info.metrics)
-      SQLExecution.withExecution
-      plan.execute()
+    val subplan = _pendingSubplans.next().map{ plan => plan.simpleHash -> plan}.toMap
+     println("EXECUTING:")
+      println(subplan)
+      println("BEFORE TRANSFORMATION:")
+      println(_bestPlan.toString)
+      val newPlan =_bestPlan transform {
+
+        case scan @ DataSourceScan(o,rdd,rel,metadata) =>
+          println(scan.simpleHash)
+          subplan.get(scan.simpleHash).get
 
 
-      //val query   = sqlContext.executePlan(plan)
-     // val executedPlan = query.executedPlan
-      val executedPlan = plan
-      println(plan.toString)
 
-      executedPlan.executeCollect()
-      executedPlan.printMetrics
-      println ("Cost :" +executedPlan.planCost())
-      updateSelectivities(executedPlan)
-      println("cardinality map :")
-      println(_relationLengthToRelations)*/
-      val executedPlan = EnsureRequirements(this.sqlContext.conf)(plan)
+      }
+      println("AFTER TRANSFORMATION:")
+
+      println(newPlan.toString)
+
+      val executedPlan = EnsureRequirements(this.sqlContext.conf)(newPlan)
       val rdd = executedPlan.execute
       rdd.cache
       rdd.collect
-      println(plan.toString)
+
       executedPlan.printMetrics
       println("Cost :" + executedPlan.planCost)
       updateSelectivities(executedPlan)
-      println("cardinality map :")
-      println(_relationLengthToRelations)
-      rdd
+      rddBuffer+=rdd
+
     }
-    ))
+    sparkContext.union(rddBuffer)
+
+
+
 
     // this.chunkedchild.map(_.execute()).reduce(_.union(_));
   }
@@ -330,29 +234,41 @@ case class BroadcastMJoin(
 
 }
 
-case class FilterStatInfo( leftAttr : Expression,
-                           rightAttr : Expression,
-                           parent : Option[FilterStatInfo] = None,
-                           equivClass : EquivalencesClass) extends Serializable {
+case class FilterStatInfo( filter : Expression
+                           ) extends Serializable {
 
-  private[this] var selectivity : Double  = 0
+  private[this] var _selectivity : Double  = 0
   private[this] val  _derived : mutable.Set[FilterStatInfo] = mutable.Set[FilterStatInfo]()
 
-  def getSelectivity : Double = selectivity
+  def selectivity : Double = _selectivity
 
-  def updateSelectivity(
+  override def toString: String = filter.toString + " , [ Sel :"+ selectivity + " ]"
 
-                       )
+  def setSelectivity(selectivity : Double): Unit ={
 
+    selectivity match {
+      case s if s < 0.0 => 0.0
+      case s if s > 1.0 => 1.0
+      case s => this._selectivity = s
 
-  def contains(condition : Expression ) : Boolean = conditions.contains(condition)
+    }
 
-  def addCondition( condition)
+  }
 
+  override def equals(that: scala.Any): Boolean = that match {
+    case FilterStatInfo(f) => f.semanticEquals(filter)
+    case _ => false
+  }
+
+  override def hashCode(): Int = filter.semanticHash()
 }
 object SelectivityPlan {
 
-  val _selectivitypPlanNodes = mutable.HashMap[Int, SelectivityPlan]();
+  val _selectivityPlanNodes = mutable.HashMap[Int, SelectivityPlan]();
+  val _selectivityPlanNodesSemantic = mutable.HashMap[Int, mutable.Set[SelectivityPlan]]();
+  val _selectivityPlanRoots = mutable.HashMap[Int, SelectivityPlan]();
+
+  val _filterStats = mutable.HashMap[Int, FilterStatInfo]();
 
   def apply(sparkPlan: SparkPlan): SelectivityPlan = fromSparkPlan(sparkPlan)
 
@@ -372,71 +288,122 @@ object SelectivityPlan {
     h
   }
 
+  private[this] def getQualifiedKeys(sparkPlan :SparkPlan, keys : Seq[Expression]): Seq[Seq[Expression]] ={
+    sparkPlan match {
+        //TODO not verification of valiity for equalities
+      case join: HashJoin =>
+
+        val rightKeys = join.rightKeys
+        val leftQualified = getQualifiedKeys(join.left, join.leftKeys)
+        getQualifiedKeys(join.right, join.rightKeys)
+        updateFilterStats(leftQualified, rightKeys, sparkPlan.selectivity())
+        _selectivityPlanNodes.get(join.simpleHash).get.setRowsFromExecution(sparkPlan.getOutputRows)
+        _selectivityPlanNodesSemantic.getOrElse(join.semanticHash,Set.empty).foreach(_.setRowsFromExecution(join.getOutputRows))
+
+        leftQualified ++ Seq(join.rightKeys)
+
+      case u: UnaryNode => u match {
+        case p@Project(_, child) => fromSparkPlan(child)
+        case f@Filter(condition, child@DataSourceScan(outputset, _, _, _)) =>
+          val semanticHashCode = f.simpleHash
+          val node = _selectivityPlanNodes.getOrElseUpdate(semanticHashCode, {
+            ScanCondition(outputset, Some(condition), f.simpleHash)
+          })
+          println("setting node 1 rows : "+ node + " "+ f.getOutputRows)
+          node.setRows(f.getOutputRows)
+          getQualifiedKeys(u.child, keys)
+        case f@Filter(condition,
+        child@HolderDataSourceScan(child0@DataSourceScan(outputset, _, _, _))) =>
+          //TODO
+          val semanticHashCode = f.simpleHash
+          val node = _selectivityPlanNodes.getOrElseUpdate(semanticHashCode, {
+            ScanCondition(outputset, Some(condition), f.simpleHash)
+          })
+          node.setRows(f.getOutputRows)
+          println("setting node 2 rows : "+ node + " "+ f.getOutputRows)
+          getQualifiedKeys(u.child, keys)
+        case _ => getQualifiedKeys(u.child, keys)
+      }
+
+        getQualifiedKeys(u.child, keys)
+      case u: LeafNode =>
+
+        Seq(keys)
+    }
+  }
+  private def updateFilterStats( qualifiedKeys : Seq[Seq[Expression]],
+                                 targetKeys: Seq[Expression],
+                                 sel : Double): Unit = {
+    val filterStatInfos = getOrCreateFilters(qualifiedKeys,targetKeys)
+    filterStatInfos foreach { fInfo =>
+      fInfo.setSelectivity(sel)
+    }
+
+  }
+
+  private[this] def getOrCreateFilters( leftChildKeys : Seq[Seq[Expression]],
+                                        rightKeys : Seq[Expression]) : Seq[FilterStatInfo] ={
+
+    leftChildKeys map { keys =>
+      val condition = (keys zip rightKeys).map { case (l, r) => EqualTo(l, r) }.reduceLeft(And)
+      _filterStats.getOrElseUpdate(condition.semanticHash(),FilterStatInfo(condition))
+    }
+
+  }
   def updatefromExecution(sparkPlan : SparkPlan) : Unit ={
 
+    sparkPlan match {
+      case join: HashJoin =>
+        val rightKeys = join.rightKeys
+        val leftQualifiedKeys = getQualifiedKeys(join.left,join.leftKeys)
+        getQualifiedKeys(join.right, join.rightKeys)
 
+        updateFilterStats(leftQualifiedKeys, rightKeys,sparkPlan.selectivity())
+        //TODO unsafe  operation
+        _selectivityPlanNodesSemantic.getOrElse(join.semanticHash,Set.empty).foreach(_.setRowsFromExecution(join.getOutputRows))
+      case u: UnaryNode => updatefromExecution(u.child)
 
-  }
-
-  def updateFromSelectivityPlan(selPlan: SelectivityPlan): Unit = {
-
-    def updateWith(targetPlan: SelectivityPlan, driverPlan: SelectivityPlan): Unit = {
-
-      targetPlan match {
-
-        case hc@HashCondition(l, r, c, sel, rows, hashCode) =>
-          updateWith(r, driverPlan)
-          updateWith(l, driverPlan)
-
-        case sc@ScanCondition(o, f, sel, rows, semanticHash) =>
-          val rightPlan = driverPlan.asInstanceOf[HashCondition].right
-          val key = joinSemanticHash(semanticHash, rightPlan.semanticHash)
-          val selectivityPlan = _selectivitypPlanNodes.get(key)
-          if (selectivityPlan.isDefined)
-            selectivityPlan.get.setRows(driverPlan.rows)
-
-      }
-    }
-
-    selPlan match {
-
-      case hc@HashCondition(l, r, c, sel, rows, hashCode) => updateWith(l, selPlan)
-      case _ => Unit
+      case u: LeafNode => Unit
 
     }
 
-
   }
-
 
   private[this] def fromSparkPlan(sparkPlan: SparkPlan): SelectivityPlan = {
 
 
-   val node = sparkPlan match {
+   sparkPlan match {
       case join: HashJoin =>
+        val simpleHashCode = join.simpleHash
         val semanticHashCode = join.semanticHash
-        _selectivitypPlanNodes.getOrElseUpdate(semanticHashCode, {
-          val otherConditions = join.condition.map(splitConjunctivePredicates).getOrElse(Nil)
-          HashCondition(fromSparkPlan(join.left),
+
+        val otherConditions = join.condition.map(splitConjunctivePredicates).getOrElse(Nil)
+        val condition = ((join.leftKeys zip join.rightKeys).map { case (l, r) => EqualTo(l, r) }
+          ++ otherConditions).reduceLeft(And)
+        val filterStatInfo = _filterStats.getOrElseUpdate(condition.semanticHash(),FilterStatInfo(condition) )
+        _selectivityPlanNodes.getOrElseUpdate(simpleHashCode, {
+
+        val newNode = HashCondition(fromSparkPlan(join.left),
             fromSparkPlan(join.right),
-            ((join.leftKeys zip join.rightKeys).map { case (l, r) => EqualTo(l, r) }
-              ++ otherConditions).reduceLeftOption(And).getOrElse(throw new IllegalArgumentException(" Can not " +
-              "get hash condition")), 0, 1, semanticHashCode)
+            filterStatInfo, simpleHashCode)
+         _selectivityPlanNodesSemantic.getOrElseUpdate(semanticHashCode, mutable.Set[SelectivityPlan]())+=newNode
+
+          newNode
         })
 
       case u: UnaryNode => u match {
         case p@Project(_, child) => fromSparkPlan(child)
         case f@Filter(condition, child@DataSourceScan(outputset, _, _, _)) =>
-          val semanticHashCode = f.semanticHash
-          _selectivitypPlanNodes.getOrElseUpdate(semanticHashCode, {
-            ScanCondition(outputset, Some(condition), f.selectivity(), f.getOutputRows, f.semanticHash)
+          val semanticHashCode = f.simpleHash
+          _selectivityPlanNodes.getOrElseUpdate(semanticHashCode, {
+            ScanCondition(outputset, Some(condition), f.simpleHash)
           })
         case f@Filter(condition,
         child@HolderDataSourceScan(child0@DataSourceScan(outputset, _, _, _))) =>
           //TO-DO
-          val semanticHashCode = f.semanticHash
-          _selectivitypPlanNodes.getOrElseUpdate(semanticHashCode, {
-            ScanCondition(outputset, Some(condition), f.selectivity(), f.getOutputRows, f.semanticHash)
+          val semanticHashCode = f.simpleHash
+          _selectivityPlanNodes.getOrElseUpdate(semanticHashCode, {
+            ScanCondition(outputset, Some(condition), f.simpleHash)
           })
 
         case _ => fromSparkPlan(u.child)
@@ -446,12 +413,6 @@ object SelectivityPlan {
 
 
     }
-    if(node !=null) {
-        node.setSelectivity(sparkPlan.selectivity())
-       node.setRows(sparkPlan.getOutputRows)
-
-      }
-
   }
 
 }
@@ -461,31 +422,26 @@ trait SemanticHashHelper{
   self: SelectivityPlan =>
 
   val semanticHash : Int
+
 }
 abstract class SelectivityPlan()
   extends TreeNode[SelectivityPlan]  with SemanticHashHelper {
 
-
-  private var _selectivity : Double = -1.0
+  private[sql] var rowsFromExecution : Option[Long] = None
   private var _rows : Long = 1
   // for future use in average
-  protected var numSelUpdates : Int = 0
-  protected var numrowsUpdates : Int = 0
+  private[sql] var numSelUpdates : Int = 0
+  private[sql] var numrowsUpdates : Int = 0
   val shortName : String
 
-  def selectivity : Double = _selectivity
-  def rows : Long = _rows
+  def selectivity : Double
+  def rows : Long =  rowsFromExecution.getOrElse(_rows)
 
-  def setSelectivity(selectivity : Double): Unit ={
 
-    selectivity match {
-      case s if s < 0.0 => 0.0
-      case s if s > 1 => 1
-      case s => this._selectivity = s
-
-    }
+  def setRowsFromExecution(rows : Long): Unit ={
+    rowsFromExecution= Some(rows)
+    setRows(rows)
   }
-
   def setRows(rows : Long): Unit ={
 
     rows match {
@@ -494,7 +450,9 @@ abstract class SelectivityPlan()
 
     }
   }
-
+  def planCost() : Long = {
+    throw new UnsupportedOperationException(s"$nodeName does not implement plan costing")
+  }
 
   override def hashCode(): Int = {
 
@@ -506,19 +464,18 @@ abstract class SelectivityPlan()
     throw new UnsupportedOperationException(s"$shortName does not implement equals")
   }
 
- // override def toString: String = s"SelectivityCondition $shortName${rows}${selectivity}"
+  /** String representation of this node without any children */
+  override def simpleString: String = s"$nodeName $argString $rows $planCost $selectivity".trim
 }
 
 case class ScanCondition( outputSet : Seq[Attribute],
                           filter : Option[Expression] = None,
-                          selectivity0 : Double,
-                          rows0 : Long,
                           override val semanticHash: Int) extends SelectivityPlan{
 
   override val shortName: String = "scanCondition"
-  setSelectivity(selectivity0)
-  setRows(rows0)
 
+
+  override def selectivity: Double = 1.0
 
   override def hashCode(): Int = {
 
@@ -541,31 +498,29 @@ case class ScanCondition( outputSet : Seq[Attribute],
     */
   override def children: Seq[ScanCondition] = Nil
 
+  override def planCost(): Long = rows
+
   /*override def toString: String =  {
 
-   super.toString+  s"${outputSet.toString}${filter.getOrElse("").toString}"
-  }*/
+     super.toString+  s"${outputSet.toString}${filter.getOrElse("").toString}"
+    }*/
   override def equals(o: Any): Boolean = o match {
 
-    case ScanCondition(o, f,_,_,_) => (o zip outputSet).map{case (a,b)=> a.semanticEquals(b)}.reduceRight(_&&_) &&
+    case ScanCondition(o, f,_) => (o zip outputSet).map{case (a,b)=> a.semanticEquals(b)}.reduceRight(_&&_) &&
       (filter zip f).map{case (a,b)=> a.semanticEquals(b)}.reduceRight(_&&_)
     case _ => false
 
   }
-  override def toString: String = super.toString  + "rows : " + rows
 }
 
 case class HashCondition(left : SelectivityPlan,
                          right : SelectivityPlan,
-                         condition : Expression,
-                         selectivity0 : Double,
-                         rows0 : Long,
+                         condition : FilterStatInfo,
                          override val  semanticHash : Int) extends SelectivityPlan{
 
-
   override val shortName: String = "hashCondition"
-  setSelectivity(selectivity0)
-  setRows(rows0)
+  private var optimizedSelectivity: Option[Double] = None
+
 
 
   override def hashCode(): Int = {
@@ -573,7 +528,7 @@ case class HashCondition(left : SelectivityPlan,
 
 
     var h = 17
-    h = h * 37 + condition.semanticHash()
+    h = h * 37 + condition.hashCode()
     h = h * 37 + left.hashCode()
     h = h * 37 + right.hashCode()
 
@@ -581,31 +536,38 @@ case class HashCondition(left : SelectivityPlan,
   }
 
 
-  override def rows: Long = {
+  override def selectivity: Double = {
+    if(rowsFromExecution.isDefined){
+      val sel = rowsFromExecution.get.asInstanceOf[Double]/ children.map(_.rows).product
+      println("Selectivity from condition : "+ condition.selectivity + "vs. "+ sel)
+      sel
+    }
+    else
+    condition.selectivity
+  }
+
+  override def rows: Long =  rowsFromExecution.getOrElse(computeRows())
+
+  private[this] def computeRows(): Long = {
 
     val computedRows = children.map(_.rows).product
-
-    setRows( (computedRows * selectivity).toLong)
-
-    super.rows
+    (computedRows * selectivity).toLong
 
   }
 
   override def equals(o: scala.Any): Boolean =  o match {
 
-      case HashCondition(l, r, c,_,_,_) => c.semanticEquals(condition)  && l.equals(left) && r.equals(right)
+      case HashCondition(l, r, c,_) => c.equals(condition)  && l.equals(left) && r.equals(right)
 
       case _ => false
 
     }
-
+  override def planCost(): Long =  left.planCost() + left.rows
   /*override def toString: String =  {
 
     super.toString + s"$shortName${condition.toString}${left.toString}${right.toString}"
   }*/
 
-
-  override def toString: String = super.toString  + "rows : " + rows
 
 
 

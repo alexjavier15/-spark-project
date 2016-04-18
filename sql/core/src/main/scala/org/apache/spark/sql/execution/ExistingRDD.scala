@@ -133,9 +133,9 @@ private[sql] case class DataSourceScan(
 
   val hashcode : Int = relation.hashCode
 
-  println("Initiating datasource scan for _" + this + " hashcode :" + hashcode)
+ // println("Initiating datasource scan for _" + this + " hashcode :" + hashcode)
 
-  override def hashCode(): Int = hashcode
+  /*override def hashCode(): Int = hashcode
 
   override def equals(o: Any): Boolean = {
     o match {
@@ -145,21 +145,11 @@ private[sql] case class DataSourceScan(
       hashcode.equals(o.hashcode)}
     case _ => false
   }
-  }
+  }*/
 
 
-  override def semanticHash : Int ={
+  override def simpleHash : Int = hashcode
 
-    var h = 17
-    output.foreach( o => {
-
-      h = h * 37 + o.semanticHash
-
-    })
-
-    h
-
-  }
   override val nodeName: String = relation.toString
 
   // Ignore rdd when checking results

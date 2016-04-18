@@ -49,7 +49,7 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
   }
 
 
-  override def hashCode(): Int = pFileDesc.hashCode()+location.hashCode()
+  override def hashCode(): Int = pFileDesc.hashCode()
 
   override def equals(o: scala.Any): Boolean = {
     o match{
