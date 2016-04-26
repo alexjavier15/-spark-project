@@ -516,8 +516,14 @@ object SQLConf {
 
   val MJOIN_ENABLED = booleanConf("spark.sql.mjoin",
     defaultValue = Some(false),
-    doc = "When true, the mjoin logic is used instead of BroadcastHashJoin" +
+    doc = "When true, the mjoin logic is used instead of default join" +
       " plan",
+    isPublic = false)
+
+  val MJOIN_SAMPLING_ENABLED = booleanConf("spark.sql.mjoin.sampling",
+    defaultValue = Some(false),
+    doc = "When true, the mjoin logic uses sampling in order to choose" +
+      " the best  plan instead of reading all subplans",
     isPublic = false)
 
   val HASHJOIN_ITERATOR_ENABLED = booleanConf("spark.sql.IteratedHashJoin",
@@ -651,6 +657,7 @@ class SQLConf extends Serializable with CatalystConf with ParserConf with Loggin
 
   def mJoinEnabled: Boolean = getConf(MJOIN_ENABLED)
 
+  def mJoinSamplingEnabled: Boolean = getConf(MJOIN_SAMPLING_ENABLED)
   def iteratedHashJoinEnabled: Boolean = getConf(HASHJOIN_ITERATOR_ENABLED)
 
 

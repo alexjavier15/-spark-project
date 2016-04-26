@@ -24,10 +24,10 @@ import org.apache.spark.broadcast
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.storage.StorageLevel.MEMORY_AND_DISK
 import org.apache.spark.sql.catalyst.planning.ExtractEquiJoinKeys._
 import org.apache.spark.sql.catalyst.trees.TreeNode
 import org.apache.spark.sql.execution._
-import org.apache.spark.sql.execution.datasources.pf.PFRelation.CHUNK_NUM
 import org.apache.spark.sql.execution.exchange.EnsureRequirements
 
 import scala.collection.JavaConverters._
@@ -82,14 +82,14 @@ case class BroadcastMJoin(
 
     val res = combine(baseRelations.values.toList)
     res.foreach{
-      c => println(c.map{ c => c.simpleHash}.mkString(","))
+      c => logInfo(c.map{ c => c.simpleHash}.mkString(","))
 
     }
 
 
-    println("***Chunk subplans***")
+    logInfo("***Chunk subplans***")
 
-    println(res)
+    logInfo(res.toString())
     res.toIterator
 
   }
@@ -116,15 +116,15 @@ case class BroadcastMJoin(
       }
 
       )
-    println(_pendingSubplans)
-    println("****Subplans****")
-    println(subplans)
-    println("****Selectivity Plans****")
-    println(SelectivityPlan._selectivityPlanRoots)
-    println("****SelectivityPlan nodes****")
-    println(SelectivityPlan._selectivityPlanNodes)
-    println("****SelectivityPlan filters****")
-    println(SelectivityPlan._filterStats)
+    logInfo(_pendingSubplans.toString())
+    logInfo("****Subplans****")
+    logInfo(subplans.toString())
+    logInfo("****Selectivity Plans****")
+    logInfo(SelectivityPlan._selectivityPlanRoots.toString())
+    logInfo("****SelectivityPlan nodes****")
+    logInfo(SelectivityPlan._selectivityPlanNodes.toString())
+    logInfo("****SelectivityPlan filters****")
+    logInfo(SelectivityPlan._filterStats.toString())
 
   }
 
@@ -168,19 +168,19 @@ case class BroadcastMJoin(
 */
     SelectivityPlan.updatefromExecution(sparkPlan)
 
-    println("****Selectivity Plans****")
-    println(SelectivityPlan._selectivityPlanRoots)
-    println("****SelectivityPlan nodes****")
-    println(SelectivityPlan._selectivityPlanNodes)
-    println("****SelectivityPlan filters****")
-    println(SelectivityPlan._filterStats)
+   // logInfo("****Selectivity Plans****")
+    //logInfo(SelectivityPlan._selectivityPlanRoots.toString())
+    //logInfo("****SelectivityPlan nodes****")
+    //logInfo(SelectivityPlan._selectivityPlanNodes.toString())
+    //logInfo("****SelectivityPlan filters****")
+    //logInfo(SelectivityPlan._filterStats.toString())
     val bestPlan =SelectivityPlan._selectivityPlanRoots.minBy{ case (hc,selPlan) => selPlan.planCost()  }
-    println("****Min  plan****")
-    println(bestPlan)
+    logInfo("****Min  plan****")
+    logInfo(bestPlan.toString())
     val oldPlan = _bestPlan
     _bestPlan=_subplansMap.getOrElse(bestPlan._1,oldPlan)
-    println("****New Optimized plan****")
-    println(_bestPlan)
+    logInfo("****New Optimized plan****")
+    logInfo(_bestPlan.toString())
 
   }
 
@@ -190,43 +190,67 @@ case class BroadcastMJoin(
 
     val rddBuffer = mutable.ArrayBuffer[RDD[InternalRow]]()
     sqlContext.setConf("spark.sql.mjoin", "false")
+    var executedRDD : RDD[InternalRow]  = null
+    var  duration : Long = 0L;
+    var tested  = false
     while(_pendingSubplans.hasNext){
 
-    val subplan = _pendingSubplans.next().map{ plan => plan.simpleHash -> plan}.toMap
-     println("EXECUTING:")
-      println(subplan)
-      println("BEFORE TRANSFORMATION:")
-      println(_bestPlan.toString)
-      val newPlan =_bestPlan transform {
+      val subplan = _pendingSubplans.next().map{ plan => plan.simpleHash -> plan}.toMap
+      val start = System.currentTimeMillis()
+      if(!tested ) {
+        logInfo("EXECUTING:")
 
-        case scan @ DataSourceScan(o,rdd,rel,metadata) =>
-          println(scan.simpleHash)
-          subplan.get(scan.simpleHash).get
+        logInfo(subplan.toString())
+        logInfo("BEFORE TRANSFORMATION:")
+        logInfo(_bestPlan.toString)
+
+        val newPlan = _bestPlan transform {
+
+          case scan@DataSourceScan(o, rdd, rel, metadata) =>
+            logInfo(scan.simpleHash.toString())
+            subplan.get(scan.simpleHash).get
+
+
+        }
+        logInfo("AFTER TRANSFORMATION:")
+
+        logInfo(newPlan.toString)
+
+        val executedPlan = EnsureRequirements(this.sqlContext.conf)(newPlan)
+        val rdd = executedPlan.execute
+
+        if (sqlContext.conf.mJoinSamplingEnabled) {
+          rdd.persist(MEMORY_AND_DISK)
+          rdd.collect()
+          executedPlan.printMetrics
+          tested = true
+          logInfo("Cost :" + executedPlan.planCost)
+          updateSelectivities(executedPlan)
+         return  EnsureRequirements(this.sqlContext.conf)(_bestPlan).execute()
+
+        } else {
+          rdd.persist(MEMORY_AND_DISK)
+          rdd.collect()
+          executedPlan.printMetrics
+          logInfo("Cost :" + executedPlan.planCost)
+          updateSelectivities(executedPlan)
+          rddBuffer += rdd
+        }
+
 
 
 
       }
-      println("AFTER TRANSFORMATION:")
-
-      println(newPlan.toString)
-
-      val executedPlan = EnsureRequirements(this.sqlContext.conf)(newPlan)
-      val rdd = executedPlan.execute
-      rdd.cache
-      rdd.collect
-
-      executedPlan.printMetrics
-      println("Cost :" + executedPlan.planCost)
-      updateSelectivities(executedPlan)
-      rddBuffer+=rdd
+      val end = System.currentTimeMillis()
+      duration += (end - start)
 
     }
+    logInfo("Duration Total: "+ duration)
+
+
     sparkContext.union(rddBuffer)
 
 
-
-
-    // this.chunkedchild.map(_.execute()).reduce(_.union(_));
   }
 
   override def output: Seq[Attribute] = child.output
@@ -290,7 +314,8 @@ object SelectivityPlan {
 
   private[this] def getQualifiedKeys(sparkPlan :SparkPlan, keys : Seq[Expression]): Seq[Seq[Expression]] ={
     sparkPlan match {
-        //TODO not verification of valiity for equalities
+
+        //TODO not verification of validity for equalities
       case join: HashJoin =>
 
         val rightKeys = join.rightKeys
@@ -309,7 +334,6 @@ object SelectivityPlan {
           val node = _selectivityPlanNodes.getOrElseUpdate(semanticHashCode, {
             ScanCondition(outputset, Some(condition), f.simpleHash)
           })
-          println("setting node 1 rows : "+ node + " "+ f.getOutputRows)
           node.setRows(f.getOutputRows)
           getQualifiedKeys(u.child, keys)
         case f@Filter(condition,
@@ -320,7 +344,6 @@ object SelectivityPlan {
             ScanCondition(outputset, Some(condition), f.simpleHash)
           })
           node.setRows(f.getOutputRows)
-          println("setting node 2 rows : "+ node + " "+ f.getOutputRows)
           getQualifiedKeys(u.child, keys)
         case _ => getQualifiedKeys(u.child, keys)
       }
@@ -539,7 +562,6 @@ case class HashCondition(left : SelectivityPlan,
   override def selectivity: Double = {
     if(rowsFromExecution.isDefined){
       val sel = rowsFromExecution.get.asInstanceOf[Double]/ children.map(_.rows).product
-      println("Selectivity from condition : "+ condition.selectivity + "vs. "+ sel)
       sel
     }
     else
