@@ -220,8 +220,8 @@ case class BroadcastMJoin(
         val rdd = executedPlan.execute
 
         if (sqlContext.conf.mJoinSamplingEnabled) {
-          rdd.persist(MEMORY_AND_DISK)
-          rdd.collect()
+          //rdd.persist(MEMORY_AND_DISK)
+          rdd.count()
           executedPlan.printMetrics
           tested = true
           logInfo("Cost :" + executedPlan.planCost)
@@ -229,8 +229,8 @@ case class BroadcastMJoin(
          return  EnsureRequirements(this.sqlContext.conf)(_bestPlan).execute()
 
         } else {
-          rdd.persist(MEMORY_AND_DISK)
-          rdd.collect()
+         // rdd.persist(MEMORY_AND_DISK)
+          rdd.count()
           executedPlan.printMetrics
           logInfo("Cost :" + executedPlan.planCost)
           updateSelectivities(executedPlan)
