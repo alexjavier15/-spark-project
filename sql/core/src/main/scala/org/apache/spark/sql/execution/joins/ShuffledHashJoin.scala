@@ -42,6 +42,7 @@ case class ShuffledHashJoin(
   override private[sql] lazy val metrics = Map(
     "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"),
     "numStreamedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of streamed matched rows"),
+     NUM_PARTITIONS_KEY ->SQLMetrics.createLongMetric(sparkContext, "number of partitions"),
     "numHashedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of hashed matched rows"))
 
   override def outputPartitioning: Partitioning = joinType match {
@@ -59,8 +60,18 @@ case class ShuffledHashJoin(
 
   protected override def doExecute(): RDD[InternalRow] = {
     val numOutputRows = longMetric("numOutputRows")
+    val hashTableSize = statistics match {
+
+      case Some(s) if buildSide == BuildRight =>
+                s.getOrElse("rightRows",64L).asInstanceOf[Int]
+      case Some(s) if buildSide == BuildLeft =>
+        s.getOrElse("leftRows",64L).asInstanceOf[Int]
+       case _ => 64
+
+    }
+
     streamedPlan.execute().zipPartitions(buildPlan.execute()) { (streamIter, buildIter) =>
-      val hashed = HashedRelation(buildIter.map(_.copy()), buildSideKeyGenerator)
+      val hashed = HashedRelation(buildIter.map(_.copy()), buildSideKeyGenerator,hashTableSize)
       val joinedRow = new JoinedRow
       joinType match {
         case Inner =>

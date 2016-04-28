@@ -54,11 +54,11 @@ case class BroadcastMJoin(
   // Keeps track of all persisted RDDs
   private val _subplansMap = subplans.getOrElse(Nil).groupBy{
     subplan => subplan.simpleHash}.map{ case (a,b)=> a -> b.head }
-  private[this] val persistentHashTables = {
-    val map: ConcurrentMap[Int, broadcast.Broadcast[HashedRelation]] = new MapMaker().
-      weakValues().makeMap[Int, broadcast.Broadcast[HashedRelation]]()
-    map.asScala
-  }
+  //private[this] val persistentHashTables = {
+  //  val map: ConcurrentMap[Int, broadcast.Broadcast[HashedRelation]] = new MapMaker().
+    //  weakValues().makeMap[Int, broadcast.Broadcast[HashedRelation]]()
+    //7map.asScala
+  //}
 
 
 
@@ -140,7 +140,27 @@ case class BroadcastMJoin(
 
     }*/
 
+  private def updateStatisticsTo(sparkPlan : SparkPlan): Unit ={
 
+        sparkPlan match {
+
+          case hj :HashJoin =>
+            val stats = SelectivityPlan._selectivityPlanNodes.
+              get(hj.simpleHash).foreach{
+              case a @ HashCondition(l,r,c,s) =>
+                val leftRows  = l.rows/l.numPartitionsFromExecution.getOrElse(2L)
+                val rightRows  = r.rows/r.numPartitionsFromExecution.getOrElse(2L)
+                hj.statistics=Some(Map( "leftRows"-> leftRows,"rightRows"->rightRows))
+
+            }
+            updateStatisticsTo(hj.left)
+          case u : UnaryNode => updateStatisticsTo(u.child)
+          case _ => Unit
+
+
+        }
+
+  }
   private def updateSelectivities(sparkPlan: SparkPlan): Unit = {
    /* val joins = sparkPlan.extractNodes[BinaryNode]
     val baseRelations = sparkPlan.extractNodes[DataSourceScan]
@@ -168,8 +188,8 @@ case class BroadcastMJoin(
 */
     SelectivityPlan.updatefromExecution(sparkPlan)
 
-   // logInfo("****Selectivity Plans****")
-    //logInfo(SelectivityPlan._selectivityPlanRoots.toString())
+    logInfo("****Selectivity Plans****")
+    logInfo(SelectivityPlan._selectivityPlanRoots.toString())
     //logInfo("****SelectivityPlan nodes****")
     //logInfo(SelectivityPlan._selectivityPlanNodes.toString())
     //logInfo("****SelectivityPlan filters****")
@@ -226,6 +246,7 @@ case class BroadcastMJoin(
           tested = true
           logInfo("Cost :" + executedPlan.planCost)
           updateSelectivities(executedPlan)
+          updateStatisticsTo(_bestPlan)
          return  EnsureRequirements(this.sqlContext.conf)(_bestPlan).execute()
 
         } else {
@@ -383,7 +404,11 @@ object SelectivityPlan {
 
         updateFilterStats(leftQualifiedKeys, rightKeys,sparkPlan.selectivity())
         //TODO unsafe  operation
-        _selectivityPlanNodesSemantic.getOrElse(join.semanticHash,Set.empty).foreach(_.setRowsFromExecution(join.getOutputRows))
+        _selectivityPlanNodesSemantic.getOrElse(join.semanticHash,Set.empty).foreach {
+          selPlan =>
+            selPlan.setRowsFromExecution(join.getOutputRows)
+            selPlan.setNumPartitionsFromExecution(sparkPlan.getNumPartitions)
+        }
       case u: UnaryNode => updatefromExecution(u.child)
 
       case u: LeafNode => Unit
@@ -449,8 +474,13 @@ trait SemanticHashHelper{
 }
 abstract class SelectivityPlan()
   extends TreeNode[SelectivityPlan]  with SemanticHashHelper {
+  private[sql] val FETCH_TUPLE_COST : Double = 1.0
+  private[sql] val CPU_TUPLE_COST : Double = 0.001
+  private[sql] val HASH_QUAL_COST : Double = 0.00025
+  private[sql] val CPU_OPERATOR_COST : Double = 0.00025
 
   private[sql] var rowsFromExecution : Option[Long] = None
+  private[sql] var numPartitionsFromExecution : Option[Long] = None
   private var _rows : Long = 1
   // for future use in average
   private[sql] var numSelUpdates : Int = 0
@@ -465,6 +495,10 @@ abstract class SelectivityPlan()
     rowsFromExecution= Some(rows)
     setRows(rows)
   }
+  def setNumPartitionsFromExecution(num : Long): Unit ={
+    numPartitionsFromExecution= Some(num)
+
+  }
   def setRows(rows : Long): Unit ={
 
     rows match {
@@ -473,7 +507,7 @@ abstract class SelectivityPlan()
 
     }
   }
-  def planCost() : Long = {
+  def planCost() : Double = {
     throw new UnsupportedOperationException(s"$nodeName does not implement plan costing")
   }
 
@@ -521,7 +555,7 @@ case class ScanCondition( outputSet : Seq[Attribute],
     */
   override def children: Seq[ScanCondition] = Nil
 
-  override def planCost(): Long = rows
+  override def planCost(): Double = rows
 
   /*override def toString: String =  {
 
@@ -584,7 +618,16 @@ case class HashCondition(left : SelectivityPlan,
       case _ => false
 
     }
-  override def planCost(): Long =  left.planCost() + left.rows
+  override def planCost(): Double = {
+
+    var startup_cost = right.planCost + left.planCost
+    startup_cost += (CPU_OPERATOR_COST  + CPU_TUPLE_COST) * right.rows
+    var run_cost = HASH_QUAL_COST * left.rows * right.rows * 2 * 0.75
+    run_cost += CPU_OPERATOR_COST * left.rows
+    run_cost += CPU_TUPLE_COST * rows
+    startup_cost + run_cost
+
+  }
   /*override def toString: String =  {
 
     super.toString + s"$shortName${condition.toString}${left.toString}${right.toString}"

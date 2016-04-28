@@ -46,6 +46,7 @@ import scala.reflect.ClassTag
 abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializable {
 
   val OUTPUT_ROWS_KEY : String = "numOutputRows"
+  val NUM_PARTITIONS_KEY : String = "numPartitions"
   /**
    * A handle to the SQL Context that was used to create this plan.   Since many operators need
    * access to the sqlContext for RDD operations or configuration this field is automatically
@@ -55,10 +56,21 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
   protected[spark] final val sqlContext = SQLContext.getActive().orNull
 
   protected def sparkContext = sqlContext.sparkContext
-
+  var statistics : Option[Map[String,Long]] = None
   var hasSelectivity : Boolean = false
   def selectivity() : Double = getOutputRows.asInstanceOf[Double]/children.map(_.getOutputRows).product
 
+  def getNumPartitions: Long = {
+    if (metrics.contains(NUM_PARTITIONS_KEY)) {
+      val num = metrics(NUM_PARTITIONS_KEY).asInstanceOf[LongSQLMetric].value.value
+      num match {
+        case n: Long if n <= 0L => 2
+        case _ => num
+      }
+    }
+    else
+      2 //min parallelism
+  }
   def getOutputRows: Long = {
     if (metrics.contains(OUTPUT_ROWS_KEY)) {
       val rows = metrics(OUTPUT_ROWS_KEY).asInstanceOf[LongSQLMetric].value.value
@@ -159,7 +171,13 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
    * preparations. Concrete implementations of SparkPlan should override doExecute.
    */
   final def execute(): RDD[InternalRow] = executeQuery {
-    doExecute()
+    val rdd = doExecute()
+    if (metrics.contains(NUM_PARTITIONS_KEY)) {
+      val numPartitions = longMetric(NUM_PARTITIONS_KEY)
+      numPartitions.reset()
+      numPartitions += rdd.getNumPartitions
+    }
+    rdd
   }
 
   /**
