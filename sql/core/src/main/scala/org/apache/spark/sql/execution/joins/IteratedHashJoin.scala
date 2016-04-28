@@ -63,16 +63,6 @@ case class IteratedHashJoin(
     val numStreamedMatchedRows = Option(longMetric("numStreamedMatchedRows"))
     val numHashedMatchedRows = Option(longMetric("numHashedMatchedRows"))
 
-    val streamed =  streamedPlan.execute()
-    val built = buildPlan.execute()
-    val numPartitions =Math.min( Math.min(streamed.getNumPartitions, built.getNumPartitions) ,2)
-    val mod = numPartitions + 1
-    var shift = 0
-    for ( x <- 0 to numPartitions){
-
-
-
-    }
 
     streamedPlan.execute().zipPartitions(buildPlan.execute()) { (streamIter, buildIter) =>
 

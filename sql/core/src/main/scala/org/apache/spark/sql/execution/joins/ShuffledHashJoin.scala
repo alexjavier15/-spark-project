@@ -40,7 +40,9 @@ case class ShuffledHashJoin(
   extends BinaryNode with HashJoin {
 
   override private[sql] lazy val metrics = Map(
-    "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"))
+    "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"),
+    "numStreamedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of streamed matched rows"),
+    "numHashedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of hashed matched rows"))
 
   override def outputPartitioning: Partitioning = joinType match {
     case Inner => PartitioningCollection(Seq(left.outputPartitioning, right.outputPartitioning))
