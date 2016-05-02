@@ -49,7 +49,9 @@ case class BroadcastMJoin(
 
   private var currentSubplans: Seq[Seq[Int]] = Seq(Seq())
   var key = -1
+  private val numSampledRows : Int = 1000
   private var _bestPlan = chunkedchild.head
+  private var _sampliFactor : Option[Long] = None
   private var _pendingSubplans  =initSubplans()
   // Keeps track of all persisted RDDs
   private val _subplansMap = subplans.getOrElse(Nil).groupBy{
@@ -205,12 +207,20 @@ case class BroadcastMJoin(
   }
 
   private[this] def getPartition0RDD(plan: SparkPlan): SparkPlan = {
+    val numRows= plan.execute().count()
+    val factor : Double= (_sampliFactor.getOrElse(numRows))/numRows.toDouble
+    var take : Double = numSampledRows*factor
+    take = take match {
+      case t if t <= 1 =>  numSampledRows
+      case _ => take.toInt
+
+    }
 
     plan match {
       case scan@DataSourceScan(o, rdd, rel, metadata) =>
         val partition0 = rdd.mapPartitionsWithIndex { (index, iterator) =>
-          if (index == 1)
-            iterator
+          if (index == 0)
+            iterator.slice(0, Math.ceil(take).toInt)
           else {
             Iterator[InternalRow]()
           }
