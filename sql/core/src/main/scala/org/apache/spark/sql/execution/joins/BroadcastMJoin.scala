@@ -49,7 +49,7 @@ case class BroadcastMJoin(
 
   private var currentSubplans: Seq[Seq[Int]] = Seq(Seq())
   var key = -1
-  private val numSampledRows : Int = 1000
+  private val numSampledRows : Int = 10000
   private var _bestPlan = chunkedchild.head
   private var _sampliFactor : Option[Long] = None
   private var _pendingSubplans  =initSubplans()
