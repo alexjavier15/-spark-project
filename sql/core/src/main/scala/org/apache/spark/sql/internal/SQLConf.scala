@@ -257,7 +257,7 @@ object SQLConf {
     isPublic = false)
 
   val SHUFFLE_PARTITIONS = intConf("spark.sql.shuffle.partitions",
-    defaultValue = Some(200),
+    defaultValue = Some(64),
     doc = "The default number of partitions to use when shuffling data for joins or aggregations.")
 
   val SHUFFLE_TARGET_POSTSHUFFLE_INPUT_SIZE =
@@ -271,7 +271,7 @@ object SQLConf {
 
   val SHUFFLE_MIN_NUM_POSTSHUFFLE_PARTITIONS =
     intConf("spark.sql.adaptive.minNumPostShufflePartitions",
-      defaultValue = Some(-1),
+      defaultValue = Some(2),
       doc = "The advisory minimal number of post-shuffle partitions provided to " +
         "ExchangeCoordinator. This setting is used in our test to make sure we " +
         "have enough parallelism to expose issues that will not be exposed with a " +

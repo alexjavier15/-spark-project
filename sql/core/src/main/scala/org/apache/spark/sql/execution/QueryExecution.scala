@@ -38,6 +38,7 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
       throw ae
   }
 
+
   lazy val analyzed: LogicalPlan = sqlContext.sessionState.analyzer.execute(logical)
   lazy val withCachedData: LogicalPlan = {
     assertAnalyzed()

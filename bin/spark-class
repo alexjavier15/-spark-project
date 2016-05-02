@@ -60,6 +60,8 @@ if [ -n "$SPARK_PREPEND_CLASSES" ]; then
   LAUNCH_CLASSPATH="${SPARK_HOME}/launcher/target/scala-$SPARK_SCALA_VERSION/classes:$LAUNCH_CLASSPATH"
 fi
 
+echo "class launcher path $LAUNCH_CLASSPATH"
+echo "class launcher path $RUNNER"
 # For tests
 if [[ -n "$SPARK_TESTING" ]]; then
   unset YARN_CONF_DIR
