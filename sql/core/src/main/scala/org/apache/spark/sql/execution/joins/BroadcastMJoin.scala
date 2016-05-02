@@ -207,28 +207,14 @@ case class BroadcastMJoin(
   }
 
   private[this] def getPartition0RDD(plan: SparkPlan): SparkPlan = {
-    val numRows= plan.execute().count()
-    val factor : Double= (_sampliFactor.getOrElse(numRows))/numRows.toDouble
-    if(factor== 1.0)
-      _sampliFactor=Some(numRows)
-    var take : Double = numSampledRows/factor
-    take = take match {
-      case t if t <= 1 =>  numSampledRows
-      case _ => take.toInt
 
-    }
+    val seed : Long = System.currentTimeMillis()
 
     plan match {
       case scan@DataSourceScan(o, rdd, rel, metadata) =>
-        val partition0 = rdd.mapPartitionsWithIndex { (index, iterator) =>
-          if (index == 0)
-            iterator.slice(0, Math.ceil(take).toInt)
-          else {
-            Iterator[InternalRow]()
-          }
 
-        }
-        DataSourceScan(o, partition0, rel, metadata)
+
+        DataSourceScan(o, rdd.sample(true,0.1,seed), rel, metadata)
       case _ => plan
     }
   }
