@@ -345,6 +345,7 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
 
   }
 
+  def executeCollectSample(num : Int): Array[InternalRow] = executeCollect()
   /**
    * Runs this query returning the result as an array.
    */
@@ -356,11 +357,7 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
     byteArrayRdd.collect().foreach { bytes =>
       decodeUnsafeRows(bytes, results)
     }
-    //val executionId = sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
-    //println(executionId)
-  //  val metrics  = sqlContext.listener.getExecutionMetrics(0)
-    //val executionUIData =  sqlContext.listener.executionIdToData(0)
-    //println(executionUIData.physicalPlanGraph.makeDotFile(metrics))
+
     results.toArray
 
   }

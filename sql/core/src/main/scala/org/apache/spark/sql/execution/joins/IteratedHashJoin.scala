@@ -47,6 +47,7 @@ case class IteratedHashJoin(
 
   override private[sql] lazy val metrics = Map(
     "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"),
+    NUM_PARTITIONS_KEY ->SQLMetrics.createLongMetric(sparkContext, "number of partitions"),
     "numStreamedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of streamed matched rows"),
     "numHashedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of hashed matched rows"))
 

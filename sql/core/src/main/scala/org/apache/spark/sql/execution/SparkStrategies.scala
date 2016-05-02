@@ -155,7 +155,7 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           } else {
             BuildLeft
           }*/
-        Seq(joins.ShuffledHashJoin(
+        Seq(joins.IteratedHashJoin(
           leftKeys, rightKeys, Inner, buildSide, condition, planLater(left), planLater(right)))
 
       case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)

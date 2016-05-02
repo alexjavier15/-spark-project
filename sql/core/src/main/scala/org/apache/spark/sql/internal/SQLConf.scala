@@ -257,7 +257,7 @@ object SQLConf {
     isPublic = false)
 
   val SHUFFLE_PARTITIONS = intConf("spark.sql.shuffle.partitions",
-    defaultValue = Some(64),
+    defaultValue = Some(200),
     doc = "The default number of partitions to use when shuffling data for joins or aggregations.")
 
   val SHUFFLE_TARGET_POSTSHUFFLE_INPUT_SIZE =
