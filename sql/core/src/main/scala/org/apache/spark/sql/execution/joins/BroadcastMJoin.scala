@@ -209,6 +209,8 @@ case class BroadcastMJoin(
   private[this] def getPartition0RDD(plan: SparkPlan): SparkPlan = {
     val numRows= plan.execute().count()
     val factor : Double= (_sampliFactor.getOrElse(numRows))/numRows.toDouble
+    if(factor== 1.0)
+      _sampliFactor=Some(numRows)
     var take : Double = numSampledRows*factor
     take = take match {
       case t if t <= 1 =>  numSampledRows
