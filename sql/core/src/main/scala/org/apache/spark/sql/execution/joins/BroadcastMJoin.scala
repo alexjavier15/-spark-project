@@ -264,7 +264,7 @@ case class BroadcastMJoin(
           logInfo("Cost :" + executedPlan.planCost)
           updateSelectivities(executedPlan)
           updateStatisticsTo(_bestPlan)
-
+          rdd.unpersist(false)
          return  EnsureRequirements(this.sqlContext.conf)(_bestPlan).execute()
 
         } else {
