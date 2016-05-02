@@ -204,20 +204,35 @@ case class BroadcastMJoin(
 
   }
 
+  private[this] def getPartition0RDD(plan: SparkPlan): SparkPlan = {
 
+    plan match {
+      case scan@DataSourceScan(o, rdd, rel, metadata) =>
+        val partition0 = rdd.mapPartitionsWithIndex { (index, iterator) =>
+          if (index == 1)
+            iterator
+          else {
+            Iterator[InternalRow]()
+          }
+
+        }
+        DataSourceScan(o, partition0, rel, metadata)
+      case _ => plan
+    }
+  }
 
   override protected def doExecute(): RDD[InternalRow] = {
 
     val rddBuffer = mutable.ArrayBuffer[RDD[InternalRow]]()
     sqlContext.setConf("spark.sql.mjoin", "false")
-    var executedRDD : RDD[InternalRow]  = null
-    var  duration : Long = 0L;
-    var tested  = false
-    while(_pendingSubplans.hasNext){
+    var executedRDD: RDD[InternalRow] = null
+    var duration: Long = 0L;
+    var tested = false
+    while (_pendingSubplans.hasNext) {
 
-      val subplan = _pendingSubplans.next().map{ plan => plan.simpleHash -> plan}.toMap
+      val subplan = _pendingSubplans.next().map { plan => plan.simpleHash -> plan }.toMap
       val start = System.currentTimeMillis()
-      if(!tested ) {
+      if (!tested) {
         logInfo("EXECUTING:")
 
         logInfo(subplan.toString())
@@ -228,10 +243,13 @@ case class BroadcastMJoin(
 
           case scan@DataSourceScan(o, rdd, rel, metadata) =>
             logInfo(scan.simpleHash.toString())
-            subplan.get(scan.simpleHash).get
+            val ds = subplan.get(scan.simpleHash).get
+            getPartition0RDD(ds)
 
 
         }
+
+
         logInfo("AFTER TRANSFORMATION:")
 
         logInfo(newPlan.toString)
@@ -240,13 +258,15 @@ case class BroadcastMJoin(
         val rdd = executedPlan.execute
 
         if (sqlContext.conf.mJoinSamplingEnabled) {
-          //rdd.persist(MEMORY_AND_DISK)
+
           rdd.count()
+
           executedPlan.printMetrics
           tested = true
           logInfo("Cost :" + executedPlan.planCost)
           updateSelectivities(executedPlan)
           updateStatisticsTo(_bestPlan)
+
          return  EnsureRequirements(this.sqlContext.conf)(_bestPlan).execute()
 
         } else {
