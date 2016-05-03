@@ -247,7 +247,10 @@ object SQLConf {
       "nodes when performing a join.  By setting this value to -1 broadcasting can be disabled. " +
       "Note that currently statistics are only supported for Hive Metastore tables where the " +
       "command<code>ANALYZE TABLE &lt;tableName&gt; COMPUTE STATISTICS noscan</code> has been run.")
-
+  val FORCE_BROADCASTJOIN = booleanConf("spark.sql.join.forceBroadcastJoin",
+    defaultValue = Some(false),
+    doc = "When true, force broadcastJoin",
+    isPublic = true)
   val DEFAULT_SIZE_IN_BYTES = longConf(
     "spark.sql.defaultSizeInBytes",
     doc = "The default table size used in query planning. By default, it is set to a larger " +
@@ -659,7 +662,7 @@ class SQLConf extends Serializable with CatalystConf with ParserConf with Loggin
 
   def mJoinSamplingEnabled: Boolean = getConf(MJOIN_SAMPLING_ENABLED)
   def iteratedHashJoinEnabled: Boolean = getConf(HASHJOIN_ITERATOR_ENABLED)
-
+  def forceBroadcastJoinEnabled: Boolean = getConf(FORCE_BROADCASTJOIN)
 
   /** ********************** SQLConf functionality methods ************ */
 

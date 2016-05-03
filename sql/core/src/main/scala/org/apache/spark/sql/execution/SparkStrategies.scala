@@ -147,6 +147,11 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         Seq(joins.BroadcastHashJoin(
           leftKeys, rightKeys, Inner, BuildLeft, condition, planLater(left), planLater(right)))
 
+      case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, CanBroadcast(right))
+        if(conf.forceBroadcastJoinEnabled) =>
+        Seq(joins.BroadcastHashJoin(
+          leftKeys, rightKeys, Inner, BuildRight, condition, planLater(left), planLater(right)))
+
       case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
       if(conf.iteratedHashJoinEnabled) =>
         val buildSide = BuildRight
