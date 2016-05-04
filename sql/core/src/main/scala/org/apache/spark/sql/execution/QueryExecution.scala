@@ -44,7 +44,7 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
     assertAnalyzed()
     sqlContext.cacheManager.useCachedData(analyzed)
   }
-  lazy val joinAnalyzer = new JoinAnalyzer(withCachedData,sqlContext)
+  lazy val joinAnalyzer = new JoinAnalyzer(analyzed,sqlContext)
   lazy val mJoinPlan : Option[LogicalPlan] = {
     if(sqlContext.conf.mJoinEnabled == true ){
       sqlContext.sparkContext.listenerBus.addListener(new TestMJoinListener())

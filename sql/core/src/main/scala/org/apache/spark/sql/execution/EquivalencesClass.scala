@@ -1,6 +1,6 @@
 package org.apache.spark.sql.execution
 
-import org.apache.spark.sql.catalyst.expressions.{EqualTo, Expression}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 
 /**
@@ -47,7 +47,7 @@ class EquivalencesClass {
 
     condition match {
 
-      case e@EqualTo(l, r) =>
+      case e@EqualTo(l : AttributeReference, r : AttributeReference) =>
         val left = children.find(plan => l.references.subsetOf(plan.outputSet))
         val right = children.find(plan => r.references.subsetOf(plan.outputSet))
         if (left.isDefined && right.isDefined) {
@@ -131,5 +131,6 @@ class EquivalencesClass {
 
   }
 
-
+  override def toString: String = "Conditions : "+ conditions.toString()+
+  "\\nMembers: "+members.toString()
 }

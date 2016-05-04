@@ -89,6 +89,7 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
       case logical.Aggregate(_, _, child) => flattenJoin(child)
       case logical.GlobalLimit(_, child) => flattenJoin(child)
       case logical.LocalLimit(_, child) => flattenJoin(child)
+      case logical.Sort(_,_,child)=>flattenJoin(child)
       case _ => (Seq(plan), Seq())
     }
     plan match {
