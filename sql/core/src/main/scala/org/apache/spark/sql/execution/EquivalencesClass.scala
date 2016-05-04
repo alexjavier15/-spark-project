@@ -8,10 +8,9 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
   */
 class EquivalencesClass {
 
-  @transient val sources: scala.collection.mutable.Set[Expression] =
+  @transient val conditions: scala.collection.mutable.Set[Expression] =
     scala.collection.mutable.Set()
-  @transient val derived: scala.collection.mutable.Set[Expression] =
-    scala.collection.mutable.Set()
+
 
   @transient val members: scala.collection.mutable.Set[EquivalenceMember] =
     scala.collection.mutable.Set()
@@ -55,10 +54,11 @@ class EquivalencesClass {
           members += EquivalenceMember(left.toSet, l)
           members += EquivalenceMember(right.toSet, r)
           relations ++= left.toSeq ++ right.toSeq
-          sources += condition
+          conditions += condition
         }
 
-      case _ => return
+
+      case _ =>
 
 
     }
@@ -69,70 +69,65 @@ class EquivalencesClass {
   }
 
   def generateJoinImpliedEqualities(left: Set[LogicalPlan],
-                                    right: Set[LogicalPlan]): Option[Expression] = {
+                                    right: Set[LogicalPlan]): Seq[Expression] = {
 
 
     val joinRelations = left.union(right)
-
     // find all members that can be part of this join
     val qualifiedMembers = members.filter(member => member.relations.subsetOf(joinRelations))
 
-    val leftMember = qualifiedMembers.find(member => member.relations.subsetOf(left))
-    val rightMember = qualifiedMembers.find(member => member.relations.subsetOf(right))
+    val leftMembers = qualifiedMembers.filter(member => member.relations.subsetOf(left))
+    val rightMembers = qualifiedMembers.filter(member => member.relations.subsetOf(right))
 
-    // we expect rightMember be size 1 as we are onl considering left deep plans
-    if (leftMember.isDefined && rightMember.isDefined) {
+    val builtConditions = buildCondtions(leftMembers.toSeq, rightMembers.toSeq)
 
-      val leftAttr = leftMember.get.outputSet
-      val rightAttr = rightMember.get.outputSet
-
-      // Look at the source conditions
-      val sourceCond = sources.find({
-        case e: EqualTo => (e.left == leftAttr) && (e.right == rightAttr)
-        case _ => false
-
-      })
-      // Look at derived conditions if not source found
-      if (sourceCond.isEmpty) {
-
-        val derivedCond = derived.find({
-          case e: EqualTo => (e.left == leftAttr) && (e.right == rightAttr)
-          case _ => false
-
-        })
-        // Create a new condition if no condition is  found so far
-        if (derivedCond.isEmpty) {
-
-          val newCond = EqualTo(leftAttr, rightAttr).withNewChildren(Seq(leftAttr, rightAttr))
-          derived += newCond
-          return Some(newCond)
-
-        }
-        return derivedCond
-
-      }
-      return sourceCond
-
-    }
-
-    None
+    conditions++=builtConditions
+    builtConditions
 
   }
 
-  private[this] def mergeWith(that: EquivalencesClass): EquivalencesClass = {
 
-    val newEquivClass = new EquivalencesClass()
-    def merge(src: EquivalencesClass, dest: EquivalencesClass): Unit = {
-      dest.sources ++= src.sources
-      dest.members ++= src.members
-      dest.relations ++= src.relations
-      src.merged = true
-      src.mergedLink = dest
+
+
+  private[this] def buildCondtions(leftMembers : Seq[EquivalenceMember],
+    rightMembers :Seq[EquivalenceMember]): Seq[Expression] = {
+
+      for (l <- leftMembers;   r <- rightMembers)
+             yield
+               EqualTo (l.outputSet, r.outputSet).withNewChildren(Seq(l.outputSet, r.outputSet))
+
+
+
+
+
     }
 
-    merge(this, newEquivClass)
-    merge(that, newEquivClass)
-    newEquivClass
+  def canMergeWith(that: EquivalencesClass): Boolean =  (this.members & that.members).nonEmpty
+  /**Merge this Equivalence class with a compatible class if possible or return this
+    * Equivalence class unchange. Two equivalence classes are compatible
+    * if and only if the have at least one common member.
+    *
+    * @param that the EquivalencesClass to emrge with
+    * @return the merged EquivalencesClass, ot this  equivalence class unchanged.
+    */
+
+ def mergeWith(that: EquivalencesClass): EquivalencesClass = {
+
+
+    def merge(src: EquivalencesClass, dest: EquivalencesClass): EquivalencesClass = {
+      val newEquivClass = new EquivalencesClass()
+      newEquivClass.conditions++= dest.conditions++src.conditions
+      newEquivClass.members ++= dest.members++src.members
+      newEquivClass.relations ++= dest.relations++src.relations
+      newEquivClass.merged = true
+      newEquivClass.mergedLink = src
+      newEquivClass
+    }
+   if(canMergeWith(that))
+     merge(this, that)
+    else
+      this
+
 
   }
 

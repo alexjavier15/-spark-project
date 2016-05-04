@@ -41,7 +41,6 @@ import scala.collection.mutable
   */
 case class BroadcastMJoin(
                            child: SparkPlan,
-                           chunkedchild: Seq[SparkPlan],
                            baseRelations: Map[Int,Seq[SparkPlan]],
                            subplans: Option[Seq[SparkPlan]]
                          )
@@ -50,8 +49,8 @@ case class BroadcastMJoin(
   private var currentSubplans: Seq[Seq[Int]] = Seq(Seq())
   var key = -1
   private val numSampledRows : Int = 10000
-  private var _bestPlan = chunkedchild.head
-  private var _sampliFactor : Option[Long] = None
+  private var _bestPlan = child
+  private var _samplingFactor : Option[Long] = None
   private var _pendingSubplans  =initSubplans()
   // Keeps track of all persisted RDDs
   private val _subplansMap = subplans.getOrElse(Nil).groupBy{
@@ -120,7 +119,7 @@ case class BroadcastMJoin(
       )
     logInfo(_pendingSubplans.toString())
     logInfo("****Subplans****")
-    logInfo(subplans.toString())
+    logInfo(subplans.toString)
     logInfo("****Selectivity Plans****")
     logInfo(SelectivityPlan._selectivityPlanRoots.toString())
     logInfo("****SelectivityPlan nodes****")
@@ -130,17 +129,6 @@ case class BroadcastMJoin(
 
   }
 
-  /*  private [this] def getNumOfBuckects(baseRelation : SparkPlan) : Int = {
-
-      baseRelation match {
-
-        case h : PFRelation =>
-
-      }
-
-
-
-    }*/
 
   private def updateStatisticsTo(sparkPlan : SparkPlan): Unit ={
 
@@ -157,45 +145,18 @@ case class BroadcastMJoin(
             }
             updateStatisticsTo(hj.left)
           case u : UnaryNode => updateStatisticsTo(u.child)
-          case _ => Unit
+          case _ =>
 
 
         }
 
   }
   private def updateSelectivities(sparkPlan: SparkPlan): Unit = {
-   /* val joins = sparkPlan.extractNodes[BinaryNode]
-    val baseRelations = sparkPlan.extractNodes[DataSourceScan]
 
-    joins.foreach(join => {
-      val baseRels: Set[SparkPlan] = sparkPlan.extractNodes[LeafNode].toSet
-      val cardinality = join.getOutputRows
-      val hj = join.asInstanceOf[HashJoin]
-      val hashCondition = _hashConditions.find( condition => condition.equals(HashCondition(hj.leftKeys,hj.rightKeys))).get
-      hashCondition.selectivity= join.selectivity()
-      val cardInfo = CardinalityInfo(baseRels, cardinality)
-      if (_relationLengthToRelations.contains(join.numLeaves))
-         _relationLengthToRelations(join.numLeaves) += cardInfo
-      else
-        _relationLengthToRelations += (join.numLeaves -> Set(cardInfo))
-    })
-
-    baseRelations.map(relation => CardinalityInfo(Set(relation), relation.getOutputRows)).foreach(cardInfo => {
-      if (_relationLengthToRelations.contains(1))
-        _relationLengthToRelations(1) += cardInfo
-      else
-        _relationLengthToRelations += (1L -> Set(cardInfo))
-
-    })
-*/
     SelectivityPlan.updatefromExecution(sparkPlan)
 
     logInfo("****Selectivity Plans****")
     logInfo(SelectivityPlan._selectivityPlanRoots.toString())
-    //logInfo("****SelectivityPlan nodes****")
-    //logInfo(SelectivityPlan._selectivityPlanNodes.toString())
-    //logInfo("****SelectivityPlan filters****")
-    //logInfo(SelectivityPlan._filterStats.toString())
     val bestPlan =SelectivityPlan._selectivityPlanRoots.minBy{ case (hc,selPlan) => selPlan.planCost()  }
     logInfo("****Min  plan****")
     logInfo(bestPlan.toString())
@@ -212,9 +173,9 @@ case class BroadcastMJoin(
 
     plan match {
       case scan@DataSourceScan(o, rdd, rel, metadata) =>
+        val withReplace = false
 
-
-        DataSourceScan(o, rdd.sample(true,0.1,seed), rel, metadata)
+        DataSourceScan(o, rdd.sample(withReplace,0.1,seed), rel, metadata)
       case _ => plan
     }
   }
@@ -224,7 +185,7 @@ case class BroadcastMJoin(
     val rddBuffer = mutable.ArrayBuffer[RDD[InternalRow]]()
     sqlContext.setConf("spark.sql.mjoin", "false")
     var executedRDD: RDD[InternalRow] = null
-    var duration: Long = 0L;
+    var duration: Long = 0L
     var tested = false
     while (_pendingSubplans.hasNext) {
 
@@ -239,8 +200,8 @@ case class BroadcastMJoin(
 
         val newPlan = _bestPlan transform {
 
-          case scan@DataSourceScan(o, rdd, rel, metadata) =>
-            logInfo(scan.simpleHash.toString())
+          case scan@DataSourceScan(_, _, _, _) =>
+            logInfo(scan.simpleHash.toString)
             val ds = subplan.get(scan.simpleHash).get
             getPartition0RDD(ds)
 
@@ -253,7 +214,7 @@ case class BroadcastMJoin(
         logInfo(newPlan.toString)
 
         val executedPlan = EnsureRequirements(this.sqlContext.conf)(newPlan)
-        val rdd = executedPlan.execute
+        val rdd = executedPlan.execute()
 
         if (sqlContext.conf.mJoinSamplingEnabled) {
 
@@ -327,11 +288,11 @@ case class FilterStatInfo( filter : Expression
 }
 object SelectivityPlan {
 
-  val _selectivityPlanNodes = mutable.HashMap[Int, SelectivityPlan]();
-  val _selectivityPlanNodesSemantic = mutable.HashMap[Int, mutable.Set[SelectivityPlan]]();
-  val _selectivityPlanRoots = mutable.HashMap[Int, SelectivityPlan]();
+  val _selectivityPlanNodes = mutable.HashMap[Int, SelectivityPlan]()
+  val _selectivityPlanNodesSemantic = mutable.HashMap[Int, mutable.Set[SelectivityPlan]]()
+  val _selectivityPlanRoots = mutable.HashMap[Int, SelectivityPlan]()
 
-  val _filterStats = mutable.HashMap[Int, FilterStatInfo]();
+  val _filterStats = mutable.HashMap[Int, FilterStatInfo]()
 
   def apply(sparkPlan: SparkPlan): SelectivityPlan = fromSparkPlan(sparkPlan)
 
@@ -429,7 +390,7 @@ object SelectivityPlan {
         }
       case u: UnaryNode => updatefromExecution(u.child)
 
-      case u: LeafNode => Unit
+      case u: LeafNode =>
 
     }
 
@@ -540,7 +501,7 @@ abstract class SelectivityPlan()
   }
 
   /** String representation of this node without any children */
-  override def simpleString: String = s"$nodeName $argString $rows $planCost $selectivity".trim
+  override def simpleString: String = s"$nodeName $argString $rows $planCost() $selectivity".trim
 }
 
 case class ScanCondition( outputSet : Seq[Attribute],
@@ -579,7 +540,7 @@ case class ScanCondition( outputSet : Seq[Attribute],
 
      super.toString+  s"${outputSet.toString}${filter.getOrElse("").toString}"
     }*/
-  override def equals(o: Any): Boolean = o match {
+  override def equals(that: Any): Boolean = that match {
 
     case ScanCondition(o, f,_) => (o zip outputSet).map{case (a,b)=> a.semanticEquals(b)}.reduceRight(_&&_) &&
       (filter zip f).map{case (a,b)=> a.semanticEquals(b)}.reduceRight(_&&_)

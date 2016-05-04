@@ -318,18 +318,6 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
     }
   }
 
-  object PushDownPartialAggregation extends Strategy {
-    def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
-      case logical.Aggregate( groupingExpressions,
-      resultExpressions,
-      l @ logical.MJoin(child, chunkedChild, baseRelations, subplans)
-      ) =>  planLater( logical.MJoin(child,
-        chunkedChild.map(child=> plan.withNewChildren(Seq(child))), baseRelations, subplans)) ::Nil
-      case _ => Nil
-
-
-    }
-  }
 
   object BroadcastNestedLoop extends Strategy {
     def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
@@ -495,11 +483,9 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
 
   object MJoin extends Strategy {
     def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
-      case logical.MJoin(child, chunkedChild, baseRelations, subplans) =>
+      case logical.MJoin(child, baseRelations, subplans) =>
         joins.BroadcastMJoin(
           planLater(child),
-          //chunkedChild,
-          chunkedChild.map(plan => planLater(plan)),
           baseRelations.map{ case(relation, chunks) =>
             planLater(relation).simpleHash-> chunks.map(planLater(_))}.toMap,
           Some(subplans.getOrElse(Seq()).map(planLater(_))))::Nil

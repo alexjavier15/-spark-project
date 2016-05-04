@@ -19,7 +19,6 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
   lazy private val (baseRelations, originalConditions): (Seq[LogicalPlan], Seq[Expression]) =
     extractJoins(originPlan).
       getOrElse((Seq(), Seq()))
-  lazy private val equivClasses = new EquivalencesClass
   lazy private val eqClasses: scala.collection.mutable.Set[EquivalencesClass] = mutable.Set()
   lazy private val accumulator: mutable.Seq[LogicalPlan] = mutable.Seq()
   val chunkedRels = findChunkedBaseRelPlans()
@@ -74,7 +73,7 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
     *
     */
   private def extractJoins(plan: LogicalPlan): Option[(Seq[LogicalPlan], Seq[Expression])] = {
-    if(sqlContext.conf.mJoinEnabled == false )
+    if(!sqlContext.conf.mJoinEnabled )
       Seq.empty
 
     // flatten all inner joins, which are next to each other
@@ -112,14 +111,28 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
 
 
   private def addEquivMembers(children: Seq[LogicalPlan], condition: Expression): Seq[LogicalPlan] = {
-    equivClasses.addEquivalence(condition, children)
+
+    val eqClassNew = new EquivalencesClass
+
+    eqClassNew.addEquivalence(condition, children)
+    val mergedClasses =eqClasses.foldLeft(eqClassNew)(_.mergeWith(_))
+
+    eqClasses.filter(_.canMergeWith(eqClassNew)).foreach {
+      {
+        eqClasses -= _
+      }
+    }
+    eqClasses+=mergedClasses
     children
   }
 
 
-  private def createJoin(left: Seq[LogicalPlan], right: Seq[LogicalPlan]): Option[Expression] = {
+  private def createJoin(left: Seq[LogicalPlan], right: Seq[LogicalPlan]): Seq[Expression] = {
 
-    equivClasses.generateJoinImpliedEqualities(left.toSet, right.toSet)
+
+    eqClasses.flatMap(eqClass =>
+      eqClass.generateJoinImpliedEqualities(left.toSet, right.toSet)).toSeq
+
 
 
   }
@@ -174,9 +187,9 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
   }
 
   private def analyzeWithMJoin(inferedPlans: List[(List[LogicalPlan],
-    List[Option[Expression]])]): Option[LogicalPlan] = {
+    List[Expression])]): Option[LogicalPlan] = {
 
-    if(sqlContext.conf.mJoinEnabled == false )
+    if(!sqlContext.conf.mJoinEnabled )
       List.empty
 
     if (inferedPlans == Nil) {
@@ -184,16 +197,14 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
     }
     else {
 
-      // filter any infered plan with null join clauses
-      val resolved = inferedPlans.map(x => (x._1, x._2.map(expr => expr.orNull))).
-        filter(x => !x._2.contains(null))
+
       // transform by remplacing LogicalRelations by  HolderLogicalRelations (Saving plannign time)
       /*
       * TO-DO
       * */
 
       // anylyzed the reordered joins
-      val analyzedJoins = resolved.map(subplan => optimizeSubplan(subplan._1, subplan._2))
+      val analyzedJoins = inferedPlans.map(subplan => optimizeSubplan(subplan._1, subplan._2))
       // We can gather one for all the leaves relations (we assume unique projections and
       // filter. Plan the original plan and get the result
      // val analyzedOriginal = optimizePlans(Seq(originPlan)).head
@@ -209,17 +220,17 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
         ( optimizePlans(Seq(relations._1)).head ,optimizePlans(relations._2)))
       //Experimental:
 
-      val chunkedOriginalJoin = chunkedOriginalOptimized.map(findRootJoin(_))
+      val optimzedOriginal = optimizePlans(Seq(originPlan))
     //  val union = sqlContext.sessionState.analyzer.execute(logical.Union(chunkedOriginalJoin))
     //  val analyzedUnion = sqlContext.sessionState.optimizer.execute(union)
-      val mJoin = logical.MJoin(findRootJoin(originPlan),chunkedOriginalJoin, analyzedChunkedRelations, Some(analyzedJoins))
+      val mJoin = logical.MJoin(findRootJoin(optimzedOriginal.head), analyzedChunkedRelations, Some(analyzedJoins))
 
-      //val mJoin = logical.MJoin(union,optimizePlans(chunkedOriginalJoin), analyzedChunkedRelations, Some(analyzedJoins))
+
 
       // make a copy of all plans above the root join and append the MJoin plan
-     val res =appendPlan[logical.Join](optimizePlans(Seq(originPlan)).head, mJoin)
+     val res =appendPlan[logical.Join](optimzedOriginal.head, mJoin)
 
-      Some(optimizePlans(Seq(res)).head)
+     Some(res)
 
 
 
@@ -315,10 +326,15 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
   }
 
   private def doPermutations(plans: Seq[LogicalPlan]): List[(List[LogicalPlan],
-    List[Option[Expression]])] = {
+    List[Expression])] = {
     if (plans != Nil) {
       initEquivClasses
-      permute(plans.toList.reverse)
+      println("*** Inititialized equivalenc classes ***")
+      println(eqClasses)
+      val permutations = permute(plans.toList.reverse)
+      println("*** End equivalenc classes ***")
+      println(eqClasses)
+      permutations
     }
     else {
       Nil
@@ -337,20 +353,24 @@ class JoinAnalyzer(private val originPlan: LogicalPlan, val sqlContext: SQLConte
 
   /** Returns a list containing all permutations of the input list */
   private[this] def permute(xs: List[LogicalPlan]): List[(List[LogicalPlan],
-    List[Option[Expression]])] = xs match {
+    List[Expression])] = xs match {
     case Nil => List((Nil, Nil))
 
     // special case lists of length 1 and 2 for better performance
     case t :: Nil => List((xs, Nil))
     case t :: u :: Nil =>
-      val r_condition = createJoin(Seq(t), Seq(u))
-      val l_condition = createJoin(Seq(u), Seq(t))
-      List((xs, List(r_condition)), (List(u, t), List(l_condition)))
+      val r_conditions = createJoin(Seq(t), Seq(u)).toList
+      val l_conditions = createJoin(Seq(u), Seq(t)).toList
+
+      r_conditions.map( condition =>  (List(t, u) , List(condition)))++
+        l_conditions.map( condition => (List(u, t) , List(condition)))
+
+
 
     case _ =>
-      for ((y, ys) <- selections(xs); ps <- permute(ys))
+      for ((y, ys) <- selections(xs); ps <- permute(ys); cond <-createJoin(ps._1, Seq(y)))
       //   yield (y :: ps._1, inferJoinClauseEquiv1(y, ps._2.head) :: ps._2)
-        yield (ps._1 :+ y, ps._2 :+ createJoin(ps._1, Seq(y)))
+        yield (ps._1 :+ y, ps._2 :+ cond)
   }
 
 
