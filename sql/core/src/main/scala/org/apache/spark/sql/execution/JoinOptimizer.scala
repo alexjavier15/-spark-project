@@ -115,6 +115,10 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       case logical.Sort(_,_,child)=>flattenJoin(child)
       case _ => (Seq(plan), Seq())
     }
+
+    logDebug("Original Plan")
+    logDebug(plan.toString)
+
     plan match {
       case f@logical.Filter(filterCondition, j@Join(_, _, Inner, _)) =>
         Some(flattenJoin(f))
@@ -226,7 +230,8 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       /*
       * TO-DO
       * */
-
+      logDebug("****Extracted Conditions*****")
+      logDebug(originalConditions.toString())
       // anylyzed the reordered joins
       val analyzedJoins = inferedPlans.map(subplan => optimizeSubplan(subplan._1, subplan._2))
       // We can gather one for all the leaves relations (we assume unique projections and
