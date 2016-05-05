@@ -1,12 +1,13 @@
 package org.apache.spark.sql.execution
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, EqualTo, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 
 /**
   * Created by alex on 21.03.16.
   */
-class EquivalencesClass {
+class EquivalencesClass extends Logging{
 
   @transient val conditions: scala.collection.mutable.Set[Expression] =
     scala.collection.mutable.Set()
@@ -113,6 +114,7 @@ class EquivalencesClass {
 
 
     def merge(src: EquivalencesClass, dest: EquivalencesClass): EquivalencesClass = {
+      logDebug("Merging :"+this.toString + " with :" + that.toString)
       val newEquivClass = new EquivalencesClass()
       newEquivClass.conditions++= dest.conditions++src.conditions
       newEquivClass.members ++= dest.members++src.members
