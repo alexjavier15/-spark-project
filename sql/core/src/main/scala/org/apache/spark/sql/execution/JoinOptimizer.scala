@@ -146,10 +146,10 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
     logDebug("Adding  new equivalence classes for :"+condition.toString)
 
     val mergedClasses =eqClasses.foldLeft(eqClassNew)(_.mergeWith(_))
-
-    eqClasses.filter(_.canMergeWith(eqClassNew)).foreach {
+    logDebug("Merged  result :"+mergedClasses.toString)
+    eqClasses.filter(_.canMergeWith(mergedClasses)).foreach {
       {eqclass =>
-        logDebug("Deleting   equivalence classes  :"+eqclass.toString)
+        logDebug("Deleting   equivalence classes  :"+eqclass.toString +" merged with "+ mergedClasses.toString)
         eqClasses -= eqclass
       }
     }
