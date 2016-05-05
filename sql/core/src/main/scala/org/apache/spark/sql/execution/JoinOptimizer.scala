@@ -230,9 +230,6 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       /*
       * TO-DO
       * */
-      logDebug("****Extracted Conditions*****")
-      logDebug(originalConditions.toString())
-      // anylyzed the reordered joins
       val analyzedJoins = inferedPlans.map(subplan => optimizeSubplan(subplan._1, subplan._2))
       // We can gather one for all the leaves relations (we assume unique projections and
       // filter. Plan the original plan and get the result
@@ -345,6 +342,9 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   private def doPermutations(plans: Seq[LogicalPlan]): List[(List[LogicalPlan],
     List[Expression])] = {
     if (plans != Nil) {
+      logDebug("****Extracted Conditions*****")
+      logDebug(originalConditions.toString())
+      // anylyzed the reordered joins
       initEquivClasses
       logInfo("*** Inititialized equivalence classes ***")
       logInfo(eqClasses.toString())
