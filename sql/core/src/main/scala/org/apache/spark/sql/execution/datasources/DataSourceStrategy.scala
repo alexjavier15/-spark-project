@@ -292,9 +292,9 @@ val res =    plan match {
       case _ => Nil
     }
     if (SQLContext.getActive().get.conf.mJoinEnabled && res != Nil) {
-      SparkOptimizer.addOptimzedPlan(plan.simpleHash, res.head)
-
-
+      plan match {
+        case l@LogicalRelation(t: HadoopPfRelation, _, _) => SparkOptimizer.addOptimzedPlan(plan.simpleHash, res.head)}
+        case _=>
     }
     res
   }
