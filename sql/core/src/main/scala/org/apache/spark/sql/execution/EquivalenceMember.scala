@@ -16,4 +16,6 @@ case class EquivalenceMember(relations: Set[LogicalPlan], outputSet: Expression)
 
 
   }
+
+  override def toString: String = relations.map(rel=>"("+rel.nodeName +","+ outputSet.toString+")" ).mkString(",")
 }

@@ -39,6 +39,7 @@ case class Project(projectList: Seq[NamedExpression], child: SparkPlan)
     child.asInstanceOf[CodegenSupport].produce(ctx, this)
   }
 
+
   override def usedInputs: AttributeSet = {
     // only the attributes those are used at least twice should be evaluated before this plan,
     // otherwise we could defer the evaluation until output attribute is actually used.

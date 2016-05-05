@@ -43,6 +43,10 @@ abstract class LogicalPlan extends QueryPlan[LogicalPlan] with Logging {
    */
   def analyzed: Boolean = _analyzed
 
+
+  def simpleHash : Int= {
+    throw new UnsupportedOperationException(s"$nodeName does not implement simpleHash")
+  }
   /**
    * Returns a copy of this node where `rule` has been recursively applied first to all of its
    * children and then itself (post-order). When `rule` does not apply to a given node, it is left
@@ -280,6 +284,8 @@ abstract class UnaryNode extends LogicalPlan {
   def child: LogicalPlan
 
   override def children: Seq[LogicalPlan] = child :: Nil
+  override def simpleHash: Int =  child.simpleHash
+
 
   /**
    * Generates an additional set of aliased constraints by replacing the original constraint
@@ -323,4 +329,12 @@ abstract class BinaryNode extends LogicalPlan {
   def right: LogicalPlan
 
   override def children: Seq[LogicalPlan] = Seq(left, right)
+  override def simpleHash : Int ={
+
+    var h = 17
+    h = h * 37 + left.simpleHash
+    h = h * 37 + right.simpleHash
+    h
+
+  }
 }

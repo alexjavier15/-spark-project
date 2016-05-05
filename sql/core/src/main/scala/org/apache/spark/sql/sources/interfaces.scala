@@ -227,6 +227,9 @@ abstract class BaseRelation {
    * @since 1.6.0
    */
   def unhandledFilters(filters: Array[Filter]): Array[Filter] = filters
+  def simpleHash : Int= {
+    throw new UnsupportedOperationException(s"BaseRelation does not implement simpleHash")
+  }
 }
 
 /**
@@ -412,7 +415,7 @@ case class HadoopFsRelation(
   def partitionSpec: PartitionSpec = location.partitionSpec()
 
   def refresh(): Unit = location.refresh()
-
+  override def simpleHash():Int = location.hashCode()
   override def toString: String =
     s"$fileFormat part: ${partitionSchema.simpleString}, data: ${dataSchema.simpleString}"
 

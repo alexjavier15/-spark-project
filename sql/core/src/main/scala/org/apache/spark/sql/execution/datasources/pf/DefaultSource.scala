@@ -91,7 +91,6 @@ class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.Defau
                                  , broadcastedConf: Broadcast[SerializableConfiguration],
                                  options: Map[String, String], relation : HadoopPfRelation  = null): RDD[InternalRow] = {
 
-    println("Building Scan for : "+ relation.location.allFiles().mkString(","))
 
     super.buildInternalScan(sqlContext,dataSchema,requiredColumns,filters,bucketSet,relation.location.allFiles(),broadcastedConf,options)
 

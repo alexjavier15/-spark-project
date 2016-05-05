@@ -135,7 +135,11 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         canBuildHashMap(right) && muchSmaller(right, left)
     }
 
-    def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
+    def apply(plan: LogicalPlan): Seq[SparkPlan] = {
+
+
+
+      plan match {
 
       // --- Inner joins --------------------------------------------------------------------------
 
@@ -160,8 +164,22 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           } else {
             BuildLeft
           }*/
-        Seq(joins.ShuffledHashJoin(
-          leftKeys, rightKeys, Inner, buildSide, condition, planLater(left), planLater(right)))
+         var simpleHash = plan.simpleHash
+        simpleHash += 37 *simpleHash + leftKeys.map(_.semanticHash()).sum
+        simpleHash += 37 *simpleHash + leftKeys.map(_.semanticHash()).sum
+        simpleHash += 37 *simpleHash + condition.map(_.semanticHash()).sum
+        if(conf.mJoinEnabled){
+
+          val optimizedPlan = SparkOptimizer.getOptimizedPlan(simpleHash)
+          if(optimizedPlan.isDefined)
+            return  Seq(optimizedPlan.get)
+
+            }
+
+        val res =joins.ShuffledHashJoin(
+          leftKeys, rightKeys, Inner, buildSide, condition, planLater(left), planLater(right))
+        SparkOptimizer.addOptimzedPlan(simpleHash,res)
+        Seq(res)
 
       case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
         if !conf.preferSortMergeJoin && shouldShuffleHashJoin(left, right) ||
@@ -212,6 +230,9 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
       // --- Cases where this strategy does not apply ---------------------------------------------
 
       case _ => Nil
+    }
+
+
     }
   }
 
@@ -488,7 +509,10 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           planLater(child),
           baseRelations.map{ case(relation, chunks) =>
             planLater(relation).simpleHash-> chunks.map(planLater(_))}.toMap,
-          Some(subplans.getOrElse(Seq()).map(planLater(_))))::Nil
+          Some(subplans.getOrElse(Seq()).map(planLater(_)))
+
+
+        )::Nil
       case _ => Nil
     }
   }

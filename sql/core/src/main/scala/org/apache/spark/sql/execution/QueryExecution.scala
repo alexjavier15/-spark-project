@@ -44,7 +44,7 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
     assertAnalyzed()
     sqlContext.cacheManager.useCachedData(analyzed)
   }
-  lazy val joinAnalyzer = new JoinAnalyzer(analyzed,sqlContext)
+  lazy val joinAnalyzer = new JoinOptimizer(analyzed,sqlContext)
   lazy val mJoinPlan : Option[LogicalPlan] = {
     if(sqlContext.conf.mJoinEnabled == true ){
       sqlContext.sparkContext.listenerBus.addListener(new TestMJoinListener())
@@ -56,10 +56,10 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
   }
 
   lazy val optimizedPlan: LogicalPlan =
-    sqlContext.sessionState.optimizer.execute(
-      mJoinPlan.getOrElse(
-        withCachedData)
-    )
+    joinAnalyzer.mJoinLogical.getOrElse( sqlContext.sessionState.optimizer.execute(withCachedData))
+
+
+
 
 
 
@@ -72,7 +72,12 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
 
     // executedPlan should not be used to initialize any SparkPlan. It should be
     // only used for execution.
-    lazy val executedPlan: SparkPlan = sqlContext.sessionState.prepareForExecution.execute(sparkPlan)
+    lazy val executedPlan: SparkPlan = {
+
+      val res = sqlContext.sessionState.prepareForExecution.execute(sparkPlan)
+      SparkOptimizer.clear()
+      res
+    }
 
     /** Internal version of the RDD. Avoids copies and has no schema */
      // val res = new UnionRDD[InternalRow](sqlContext.sparkContext, Seq(executedPlan.execute(), executedPlan.execute()))

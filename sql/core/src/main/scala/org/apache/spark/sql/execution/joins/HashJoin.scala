@@ -55,6 +55,28 @@ trait HashJoin {
     }
   }
 
+  override def simpleHash: Int = {
+    var h = 17
+    h = h * 37 + left.simpleHash
+    h = h * 37 + right.simpleHash
+    h = h * 37 + rightKeys.map(_.semanticHash()).sum
+    h = h * 37 + leftKeys.map(_.semanticHash()).sum
+    h = h * 37 + condition.map(_.semanticHash()).sum
+    h
+  }
+
+
+  override def semanticHash: Int = {
+    var h = 17
+    h = h * 37 + left.semanticHash + right.semanticHash +
+      leftKeys.map(_.semanticHash()).sum +
+      rightKeys.map(_.semanticHash()).sum +
+      condition.map(_.semanticHash()).sum
+
+    h
+
+  }
+
   protected lazy val (buildPlan, streamedPlan) = buildSide match {
     case BuildLeft => (left, right)
     case BuildRight => (right, left)

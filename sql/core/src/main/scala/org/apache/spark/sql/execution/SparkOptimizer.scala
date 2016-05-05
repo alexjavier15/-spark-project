@@ -19,8 +19,44 @@ package org.apache.spark.sql.execution
 
 import org.apache.spark.sql.ExperimentalMethods
 import org.apache.spark.sql.catalyst.optimizer.Optimizer
+import org.apache.spark.sql.catalyst.plans.logical.{BinaryNode,LogicalPlan}
+import org.apache.spark.sql.execution.{BinaryNode,UnaryNode,LeafNode}
 
+import scala.collection.mutable
 class SparkOptimizer(experimentalMethods: ExperimentalMethods) extends Optimizer {
   override def batches: Seq[Batch] = super.batches :+ Batch(
     "User Provided Optimizers", FixedPoint(100), experimentalMethods.extraOptimizations: _*)
+}
+object SparkOptimizer {
+
+
+  val _optimizedPlans : mutable.Map[Int,SparkPlan] =  mutable.Map[Int, SparkPlan]()
+  var _hits = 0
+  var _adds = 0
+
+  def addOptimzedPlan(simpleHash : Int , sparkPlan: SparkPlan): Unit = {
+
+    if(!_optimizedPlans.contains(simpleHash)){
+    _optimizedPlans+=(simpleHash-> sparkPlan)
+      _adds+=1
+    }
+
+  }
+  def getOptimizedPlan(simpleHash : Int): Option[SparkPlan] = {
+    val res =_optimizedPlans.get(simpleHash)
+    if(res.isDefined)
+      _hits+=1
+    res
+
+  }
+
+  def clear():Unit={
+
+    println("***Clearing SparkOptimzer Cache. adds: "+_adds+", hits: "+_hits+"*******")
+    _optimizedPlans.clear()
+    _adds=0
+    _hits=0
+  }
+
+
 }

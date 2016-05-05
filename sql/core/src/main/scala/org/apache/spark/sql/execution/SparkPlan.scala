@@ -339,8 +339,8 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
   }
 
   def printMetrics : Unit = {
-    println(nodeName + " :" +metrics)
-    println("Selectivity" + " :" +selectivity())
+    logInfo(nodeName + " :" +metrics)
+    logInfo("Selectivity" + " :" +selectivity())
     children.foreach(_.printMetrics)
 
   }

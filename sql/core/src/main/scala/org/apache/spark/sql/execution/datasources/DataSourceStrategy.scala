@@ -35,7 +35,7 @@ import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.pf.PFRelation.{CHUNK_NUM, CHUNK_RECORDS}
 import org.apache.spark.sql.execution.DataSourceScan.{INPUT_PATHS, PUSHED_FILTERS}
-import org.apache.spark.sql.execution.{HolderDataSourceScan, SparkPlan}
+import org.apache.spark.sql.execution.{HolderDataSourceScan, SparkOptimizer, SparkPlan}
 import org.apache.spark.sql.execution.command.ExecutedCommand
 import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 import org.apache.spark.sql.execution.vectorized.{ColumnVectorUtils, ColumnarBatch}
@@ -88,199 +88,216 @@ private[sql] object DataSourceAnalysis extends Rule[LogicalPlan] {
  * A Strategy for planning scans over data sources defined using the sources API.
  */
 private[sql] object DataSourceStrategy extends Strategy with Logging {
-  def apply(plan: LogicalPlan): Seq[execution.SparkPlan] = plan match {
+  def apply(plan: LogicalPlan): Seq[execution.SparkPlan] = {
+
+    if (SQLContext.getActive().get.conf.mJoinEnabled) {
+      val optimizedPlan = SparkOptimizer.getOptimizedPlan (plan.simpleHash)
+      if (optimizedPlan.isDefined)
+        return Seq (optimizedPlan.get)
+
+    }
+
+val res =    plan match {
+
 
       /**
         * Alex: for mjoin
-        * */
-    case HolderLogicalRelation(l, r)=>  HolderDataSourceScan(apply(l).head) ::Nil
-    /**
-      * Normal execution
-      * */
-    case PhysicalOperation(projects, filters, l @ LogicalRelation(t: CatalystScan, _, _)) =>
-      pruneFilterProjectRaw(
-        l,
-        projects,
-        filters,
-        (requestedColumns, allPredicates, _) =>
-          toCatalystRDD(l, requestedColumns, t.buildScan(requestedColumns, allPredicates))) :: Nil
+        **/
+      case HolderLogicalRelation(l, r) => HolderDataSourceScan(apply(l).head) :: Nil
 
-    case PhysicalOperation(projects, filters, l @ LogicalRelation(t: PrunedFilteredScan, _, _)) =>
-      pruneFilterProject(
-        l,
-        projects,
-        filters,
-        (a, f) => toCatalystRDD(l, a, t.buildScan(a.map(_.name).toArray, f))) :: Nil
+      /**
+        * Normal execution
+        **/
+      case PhysicalOperation(projects, filters, l@LogicalRelation(t: CatalystScan, _, _)) =>
+        pruneFilterProjectRaw(
+          l,
+          projects,
+          filters,
+          (requestedColumns, allPredicates, _) =>
+            toCatalystRDD(l, requestedColumns, t.buildScan(requestedColumns, allPredicates))) :: Nil
 
-    case PhysicalOperation(projects, filters, l @ LogicalRelation(t: PrunedScan, _, _)) =>
-      pruneFilterProject(
-        l,
-        projects,
-        filters,
-        (a, _) => toCatalystRDD(l, a, t.buildScan(a.map(_.name).toArray))) :: Nil
+      case PhysicalOperation(projects, filters, l@LogicalRelation(t: PrunedFilteredScan, _, _)) =>
+        pruneFilterProject(
+          l,
+          projects,
+          filters,
+          (a, f) => toCatalystRDD(l, a, t.buildScan(a.map(_.name).toArray, f))) :: Nil
 
-    // Scanning partitioned HadoopFsRelation
-    case PhysicalOperation(projects, filters, l @ LogicalRelation(t: HadoopFsRelation, _, _))
+      case PhysicalOperation(projects, filters, l@LogicalRelation(t: PrunedScan, _, _)) =>
+        pruneFilterProject(
+          l,
+          projects,
+          filters,
+          (a, _) => toCatalystRDD(l, a, t.buildScan(a.map(_.name).toArray))) :: Nil
+
+      // Scanning partitioned HadoopFsRelation
+      case PhysicalOperation(projects, filters, l@LogicalRelation(t: HadoopFsRelation, _, _))
         if t.partitionSchema.nonEmpty =>
-      // We divide the filter expressions into 3 parts
-      val partitionColumns = AttributeSet(
-        t.partitionSchema.map(c => l.output.find(_.name == c.name).get))
+        // We divide the filter expressions into 3 parts
+        val partitionColumns = AttributeSet(
+          t.partitionSchema.map(c => l.output.find(_.name == c.name).get))
 
-      // Only pruning the partition keys
-      val partitionFilters = filters.filter(_.references.subsetOf(partitionColumns))
+        // Only pruning the partition keys
+        val partitionFilters = filters.filter(_.references.subsetOf(partitionColumns))
 
-      // Only pushes down predicates that do not reference partition keys.
-      val pushedFilters = filters.filter(_.references.intersect(partitionColumns).isEmpty)
+        // Only pushes down predicates that do not reference partition keys.
+        val pushedFilters = filters.filter(_.references.intersect(partitionColumns).isEmpty)
 
-      // Predicates with both partition keys and attributes
-      val partitionAndNormalColumnFilters =
-        filters.toSet -- partitionFilters.toSet -- pushedFilters.toSet
+        // Predicates with both partition keys and attributes
+        val partitionAndNormalColumnFilters =
+          filters.toSet -- partitionFilters.toSet -- pushedFilters.toSet
 
-      val selectedPartitions = t.location.listFiles(partitionFilters)
+        val selectedPartitions = t.location.listFiles(partitionFilters)
 
-      logInfo {
-        val total = t.partitionSpec.partitions.length
-        val selected = selectedPartitions.length
-        val percentPruned = (1 - selected.toDouble / total.toDouble) * 100
-        s"Selected $selected partitions out of $total, pruned $percentPruned% partitions."
-      }
-
-      // need to add projections from "partitionAndNormalColumnAttrs" in if it is not empty
-      val partitionAndNormalColumnAttrs = AttributeSet(partitionAndNormalColumnFilters)
-      val partitionAndNormalColumnProjs = if (partitionAndNormalColumnAttrs.isEmpty) {
-        projects
-      } else {
-        (partitionAndNormalColumnAttrs ++ projects).toSeq
-      }
-
-      // Prune the buckets based on the pushed filters that do not contain partitioning key
-      // since the bucketing key is not allowed to use the columns in partitioning key
-      val bucketSet = getBuckets(pushedFilters, t.bucketSpec)
-      val scan = buildPartitionedTableScan(
-        l,
-        partitionAndNormalColumnProjs,
-        pushedFilters,
-        bucketSet,
-        t.partitionSpec.partitionColumns,
-        selectedPartitions,
-        t.options)
-
-      // Add a Projection to guarantee the original projection:
-      // this is because "partitionAndNormalColumnAttrs" may be different
-      // from the original "projects", in elements or their ordering
-
-      partitionAndNormalColumnFilters.reduceLeftOption(expressions.And).map(cf =>
-        if (projects.isEmpty || projects == partitionAndNormalColumnProjs) {
-          // if the original projection is empty, no need for the additional Project either
-          execution.Filter(cf, scan)
-        } else {
-          execution.Project(projects, execution.Filter(cf, scan))
+        logInfo {
+          val total = t.partitionSpec.partitions.length
+          val selected = selectedPartitions.length
+          val percentPruned = (1 - selected.toDouble / total.toDouble) * 100
+          s"Selected $selected partitions out of $total, pruned $percentPruned% partitions."
         }
-      ).getOrElse(scan) :: Nil
 
-    // TODO: The code for planning bucketed/unbucketed/partitioned/unpartitioned tables contains
-    // a lot of duplication and produces overly complicated RDDs.
+        // need to add projections from "partitionAndNormalColumnAttrs" in if it is not empty
+        val partitionAndNormalColumnAttrs = AttributeSet(partitionAndNormalColumnFilters)
+        val partitionAndNormalColumnProjs = if (partitionAndNormalColumnAttrs.isEmpty) {
+          projects
+        } else {
+          (partitionAndNormalColumnAttrs ++ projects).toSeq
+        }
 
-    // Scanning non-partitioned HadoopFsRelation
+        // Prune the buckets based on the pushed filters that do not contain partitioning key
+        // since the bucketing key is not allowed to use the columns in partitioning key
+        val bucketSet = getBuckets(pushedFilters, t.bucketSpec)
+        val scan = buildPartitionedTableScan(
+          l,
+          partitionAndNormalColumnProjs,
+          pushedFilters,
+          bucketSet,
+          t.partitionSpec.partitionColumns,
+          selectedPartitions,
+          t.options)
 
-    case PhysicalOperation(projects, filters, l @ LogicalRelation(t: HadoopPfRelation, _, _)) =>
-      val sharedHadoopConf = SparkHadoopUtil.get.conf
-      val confBroadcast =
-        t.sqlContext.sparkContext.broadcast(new SerializableConfiguration(sharedHadoopConf))
+        // Add a Projection to guarantee the original projection:
+        // this is because "partitionAndNormalColumnAttrs" may be different
+        // from the original "projects", in elements or their ordering
 
-      // TO-DO : eliminate t parameters
-      pruneFilterProject(
-        l,
-        projects,
-        filters,
-        (a, f) =>
-          t.fileFormat.buildInternalScan(
-            t.sqlContext,
-            t.dataSchema,
-            a.map(_.name).toArray,
-            f,
-            None,
-            t.location.allFiles(),
-            confBroadcast,
-            t.options,t)) :: Nil
+        partitionAndNormalColumnFilters.reduceLeftOption(expressions.And).map(cf =>
+          if (projects.isEmpty || projects == partitionAndNormalColumnProjs) {
+            // if the original projection is empty, no need for the additional Project either
+            execution.Filter(cf, scan)
+          } else {
+            execution.Project(projects, execution.Filter(cf, scan))
+          }
+        ).getOrElse(scan) :: Nil
 
-    case PhysicalOperation(projects, filters, l @ LogicalRelation(t: HadoopFsRelation, _, _)) =>
-      // See buildPartitionedTableScan for the reason that we need to create a shard
-      // broadcast HadoopConf.
-      val sharedHadoopConf = SparkHadoopUtil.get.conf
-      val confBroadcast =
-        t.sqlContext.sparkContext.broadcast(new SerializableConfiguration(sharedHadoopConf))
+      // TODO: The code for planning bucketed/unbucketed/partitioned/unpartitioned tables contains
+      // a lot of duplication and produces overly complicated RDDs.
 
-      t.bucketSpec match {
-        case Some(spec) if t.sqlContext.conf.bucketingEnabled =>
-          val scanBuilder: (Seq[Attribute], Array[Filter]) => RDD[InternalRow] = {
-            (requiredColumns: Seq[Attribute], filters: Array[Filter]) => {
-              val bucketed =
-                t.location
-                  .allFiles()
-                  .filterNot(_.getPath.getName startsWith "_")
-                  .groupBy { f =>
-                    BucketingUtils
-                      .getBucketId(f.getPath.getName)
-                      .getOrElse(sys.error(s"Invalid bucket file ${f.getPath}"))
-                  }
+      // Scanning non-partitioned HadoopFsRelation
 
-              val bucketedDataMap = bucketed.mapValues { bucketFiles =>
+      case PhysicalOperation(projects, filters, l@LogicalRelation(t: HadoopPfRelation, _, _)) =>
+        val sharedHadoopConf = SparkHadoopUtil.get.conf
+        val confBroadcast =
+          t.sqlContext.sparkContext.broadcast(new SerializableConfiguration(sharedHadoopConf))
+
+        // TO-DO : eliminate t parameters
+        pruneFilterProject(
+          l,
+          projects,
+          filters,
+          (a, f) =>
+            t.fileFormat.buildInternalScan(
+              t.sqlContext,
+              t.dataSchema,
+              a.map(_.name).toArray,
+              f,
+              None,
+              t.location.allFiles(),
+              confBroadcast,
+              t.options, t)) :: Nil
+
+      case PhysicalOperation(projects, filters, l@LogicalRelation(t: HadoopFsRelation, _, _)) =>
+        // See buildPartitionedTableScan for the reason that we need to create a shard
+        // broadcast HadoopConf.
+        val sharedHadoopConf = SparkHadoopUtil.get.conf
+        val confBroadcast =
+          t.sqlContext.sparkContext.broadcast(new SerializableConfiguration(sharedHadoopConf))
+
+        t.bucketSpec match {
+          case Some(spec) if t.sqlContext.conf.bucketingEnabled =>
+            val scanBuilder: (Seq[Attribute], Array[Filter]) => RDD[InternalRow] = {
+              (requiredColumns: Seq[Attribute], filters: Array[Filter]) => {
+                val bucketed =
+                  t.location
+                    .allFiles()
+                    .filterNot(_.getPath.getName startsWith "_")
+                    .groupBy { f =>
+                      BucketingUtils
+                        .getBucketId(f.getPath.getName)
+                        .getOrElse(sys.error(s"Invalid bucket file ${f.getPath}"))
+                    }
+
+                val bucketedDataMap = bucketed.mapValues { bucketFiles =>
+                  t.fileFormat.buildInternalScan(
+                    t.sqlContext,
+                    t.dataSchema,
+                    requiredColumns.map(_.name).toArray,
+                    filters,
+                    None,
+                    bucketFiles,
+                    confBroadcast,
+                    t.options).coalesce(1)
+                }
+
+                val bucketedRDD = new UnionRDD(t.sqlContext.sparkContext,
+                  (0 until spec.numBuckets).map { bucketId =>
+                    bucketedDataMap.get(bucketId).getOrElse {
+                      t.sqlContext.emptyResult: RDD[InternalRow]
+                    }
+                  })
+                bucketedRDD
+              }
+            }
+
+            pruneFilterProject(
+              l,
+              projects,
+              filters,
+              scanBuilder) :: Nil
+
+          case _ =>
+            pruneFilterProject(
+              l,
+              projects,
+              filters,
+              (a, f) =>
                 t.fileFormat.buildInternalScan(
                   t.sqlContext,
                   t.dataSchema,
-                  requiredColumns.map(_.name).toArray,
-                  filters,
+                  a.map(_.name).toArray,
+                  f,
                   None,
-                  bucketFiles,
+                  t.location.allFiles(),
                   confBroadcast,
-                  t.options).coalesce(1)
-              }
+                  t.options)) :: Nil
+        }
 
-              val bucketedRDD = new UnionRDD(t.sqlContext.sparkContext,
-                (0 until spec.numBuckets).map { bucketId =>
-                  bucketedDataMap.get(bucketId).getOrElse {
-                    t.sqlContext.emptyResult: RDD[InternalRow]
-                  }
-                })
-              bucketedRDD
-            }
-          }
+      case l@LogicalRelation(baseRelation: TableScan, _, _) =>
+        execution.DataSourceScan(
+          l.output, toCatalystRDD(l, baseRelation.buildScan()), baseRelation) :: Nil
 
-          pruneFilterProject(
-            l,
-            projects,
-            filters,
-            scanBuilder) :: Nil
-
-        case _ =>
-          pruneFilterProject(
-            l,
-            projects,
-            filters,
-            (a, f) =>
-              t.fileFormat.buildInternalScan(
-                t.sqlContext,
-                t.dataSchema,
-                a.map(_.name).toArray,
-                f,
-                None,
-                t.location.allFiles(),
-                confBroadcast,
-                t.options)) :: Nil
-      }
-
-    case l @ LogicalRelation(baseRelation: TableScan, _, _) =>
-      execution.DataSourceScan(
-        l.output, toCatalystRDD(l, baseRelation.buildScan()), baseRelation) :: Nil
-
-    case i @ logical.InsertIntoTable(l @ LogicalRelation(t: InsertableRelation, _, _),
+      case i@logical.InsertIntoTable(l@LogicalRelation(t: InsertableRelation, _, _),
       part, query, overwrite, false) if part.isEmpty =>
-      ExecutedCommand(InsertIntoDataSource(l, query, overwrite)) :: Nil
+        ExecutedCommand(InsertIntoDataSource(l, query, overwrite)) :: Nil
 
-    case _ => Nil
+      case _ => Nil
+    }
+    if (SQLContext.getActive().get.conf.mJoinEnabled && res != Nil) {
+      SparkOptimizer.addOptimzedPlan(plan.simpleHash, res.head)
+
+
+    }
+    res
   }
-
   private def buildPartitionedTableScan(
       logicalRelation: LogicalRelation,
       projections: Seq[NamedExpression],
@@ -653,7 +670,7 @@ private[sql] object DataSourceStrategy extends Strategy with Logging {
         projects.map(_.toAttribute),
         scanBuilder(requestedColumns, candidatePredicates, pushedFilters),
         relation.relation, metadata)
-      filterCondition.map(execution.Filter(_, scan)).getOrElse(scan)
+       filterCondition.map(execution.Filter(_, scan)).getOrElse(scan)
     } else {
       // Don't request columns that are only referenced by pushed filters.
       val requestedColumns =
@@ -663,8 +680,10 @@ private[sql] object DataSourceStrategy extends Strategy with Logging {
         requestedColumns,
         scanBuilder(requestedColumns, candidatePredicates, pushedFilters),
         relation.relation, metadata)
-      execution.Project(
+     execution.Project(
         projects, filterCondition.map(execution.Filter(_, scan)).getOrElse(scan))
+
+
     }
   }
 

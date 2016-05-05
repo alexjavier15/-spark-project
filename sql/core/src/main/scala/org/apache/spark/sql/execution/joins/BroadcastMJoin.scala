@@ -82,15 +82,9 @@ case class BroadcastMJoin(
 
 
     val res = combine(baseRelations.values.toList)
-    res.foreach{
-      c => logInfo(c.map{ c => c.simpleHash}.mkString(","))
-
-    }
 
 
-    logInfo("***Chunk subplans***")
 
-    logInfo(res.toString())
     res.toIterator
 
   }
@@ -201,7 +195,6 @@ case class BroadcastMJoin(
         val newPlan = _bestPlan transform {
 
           case scan@DataSourceScan(_, _, _, _) =>
-            logInfo(scan.simpleHash.toString)
             val ds = subplan.get(scan.simpleHash).get
             getPartition0RDD(ds)
 

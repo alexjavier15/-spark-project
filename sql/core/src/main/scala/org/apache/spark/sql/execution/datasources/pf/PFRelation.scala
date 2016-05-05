@@ -49,7 +49,11 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
   }
 
   override def hashCode(): Int = pFileDesc.hashCode()
-
+  override def simpleHash(): Int = {
+    var h = 17
+    h = 37 * super.simpleHash() + pFileDesc.hashCode()
+    h
+  }
   override def equals(o: scala.Any): Boolean = {
     o match{
     case h : HadoopPfRelation if  pFileDesc.equals(h.pFileDesc) &&
@@ -58,8 +62,11 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
 
   }}
 
-  override val schema: StructType = {if (hasParent) {
-    println("returning parent schema ");parent.schema} else dataSchema}
+  override val schema: StructType = {
+    if (hasParent) {
+      parent.schema
+    } else dataSchema
+  }
 
   /*val fileDesc = PFRelation.readPFileInfo(location.paths.head.getName)
 
@@ -167,9 +174,8 @@ protected[sql] object PFRelation extends Logging {
     val json = fromFile(path).getLines().reduce(_ + _)
     val data = parse(json)
 
-    println(data)
+
     val extractedClass = data.extract[A]
-    println(extractedClass)
     extractedClass
 
 
@@ -207,7 +213,7 @@ case class PFileDesc(file_name: String,
                      schema_location: String) {
   lazy val chunkPFArray = chunk_locations.map(chunk => {
     val chunkDesc = PFRelation.extractPFMetadata[ChunkDesc](chunk.holder_location)
-    println(chunkDesc)
+
     chunkDesc
   })
   implicit val formats = new Serializable {DefaultFormats}

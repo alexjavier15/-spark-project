@@ -110,6 +110,15 @@ case class Filter(condition: Expression, child: LogicalPlan)
 
   override protected def validConstraints: Set[Expression] =
     child.constraints.union(splitConjunctivePredicates(condition).toSet)
+  override def simpleHash : Int ={
+
+    var h = 17
+    h = h * 37 + condition.map(_.semanticHash).sum
+    h = h * 37 + child.simpleHash
+    h
+
+  }
+
 }
 
 abstract class SetOperation(left: LogicalPlan, right: LogicalPlan) extends BinaryNode {
@@ -251,6 +260,8 @@ case class Join(
     condition: Option[Expression])
   extends BinaryNode with PredicateHelper {
 
+
+
   override def output: Seq[Attribute] = {
     joinType match {
       case LeftSemi =>
@@ -264,6 +275,11 @@ case class Join(
       case _ =>
         left.output ++ right.output
     }
+
+
+
+
+
   }
 
   override protected def validConstraints: Set[Expression] = {

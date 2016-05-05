@@ -102,7 +102,9 @@ class EquivalencesClass {
 
     }
 
-  def canMergeWith(that: EquivalencesClass): Boolean =  (this.members & that.members).nonEmpty
+  def canMergeWith(that: EquivalencesClass): Boolean =  this.members.isEmpty  ||
+    that.members.isEmpty ||
+    (this.members & that.members).nonEmpty
   /**Merge this Equivalence class with a compatible class if possible or return this
     * Equivalence class unchange. Two equivalence classes are compatible
     * if and only if the have at least one common member.
