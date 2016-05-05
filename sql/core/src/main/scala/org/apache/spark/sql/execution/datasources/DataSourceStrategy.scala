@@ -91,9 +91,15 @@ private[sql] object DataSourceStrategy extends Strategy with Logging {
   def apply(plan: LogicalPlan): Seq[execution.SparkPlan] = {
 
     if (SQLContext.getActive().get.conf.mJoinEnabled) {
-      val optimizedPlan = SparkOptimizer.getOptimizedPlan (plan.simpleHash)
-      if (optimizedPlan.isDefined)
-        return Seq (optimizedPlan.get)
+
+      plan match {
+        case l@LogicalRelation(t: HadoopPfRelation, _, _) =>
+          val optimizedPlan = SparkOptimizer.getOptimizedPlan (plan.simpleHash)
+          if (optimizedPlan.isDefined)
+            return Seq (optimizedPlan.get)
+        case _ =>
+      }
+
 
     }
 
