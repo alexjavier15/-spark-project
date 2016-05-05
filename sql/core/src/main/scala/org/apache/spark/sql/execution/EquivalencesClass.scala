@@ -1,6 +1,6 @@
 package org.apache.spark.sql.execution
 
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Expression}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, EqualTo, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 
 /**
@@ -14,8 +14,7 @@ class EquivalencesClass {
 
   @transient val members: scala.collection.mutable.Set[EquivalenceMember] =
     scala.collection.mutable.Set()
-  @transient val relations: scala.collection.mutable.Set[LogicalPlan] =
-    scala.collection.mutable.Set()
+
 
   @transient var merged: Boolean = false
   @transient var mergedLink: EquivalencesClass = null
@@ -43,20 +42,15 @@ class EquivalencesClass {
 
   }*/
 
-  def addEquivalence(condition: Expression, children: Seq[LogicalPlan]): Unit = {
+  def addEquivalence(condition: Expression): Unit = {
 
     condition match {
 
       case e@EqualTo(l : AttributeReference, r : AttributeReference) =>
-        val left = children.find(plan => l.references.subsetOf(plan.outputSet))
-        val right = children.find(plan => r.references.subsetOf(plan.outputSet))
-        if (left.isDefined && right.isDefined) {
-          members += EquivalenceMember(left.toSet, l)
-          members += EquivalenceMember(right.toSet, r)
-          relations ++= left.toSeq ++ right.toSeq
-          conditions += condition
-        }
 
+          members += EquivalenceMember( l)
+          members += EquivalenceMember( r)
+          conditions += condition
 
       case _ =>
 
@@ -68,16 +62,18 @@ class EquivalencesClass {
 
   }
 
+  protected def canEvaluate(member: EquivalenceMember, plans: Set[LogicalPlan]): Boolean ={
+
+    val outputset = AttributeSet(plans.flatMap(plan=>plan.outputSet))
+    member.outputSet.references.subsetOf(outputset)
+  }
+
   def generateJoinImpliedEqualities(left: Set[LogicalPlan],
                                     right: Set[LogicalPlan]): Seq[Expression] = {
 
 
-    val joinRelations = left.union(right)
-    // find all members that can be part of this join
-    val qualifiedMembers = members.filter(member => member.relations.subsetOf(joinRelations))
-
-    val leftMembers = qualifiedMembers.filter(member => member.relations.subsetOf(left))
-    val rightMembers = qualifiedMembers.filter(member => member.relations.subsetOf(right))
+    val leftMembers = members.filter(canEvaluate(_,left))
+    val rightMembers = members.filter(canEvaluate(_,right))
 
     val builtConditions = buildCondtions(leftMembers.toSeq, rightMembers.toSeq)
 
@@ -120,7 +116,6 @@ class EquivalencesClass {
       val newEquivClass = new EquivalencesClass()
       newEquivClass.conditions++= dest.conditions++src.conditions
       newEquivClass.members ++= dest.members++src.members
-      newEquivClass.relations ++= dest.relations++src.relations
       newEquivClass.merged = true
       newEquivClass.mergedLink = src
       newEquivClass
@@ -133,6 +128,6 @@ class EquivalencesClass {
 
   }
 
-  override def toString: String = "Conditions : "+ conditions.toString()+
-  "\\nMembers: "+members.toString()
+  override def toString: String = "\n+[-Conditions : "+ conditions.toString()+
+  "\n -Members: "+members.toString()+"]"
 }

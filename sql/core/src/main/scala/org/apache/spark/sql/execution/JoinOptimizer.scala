@@ -134,11 +134,11 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   }
 
 
-  private def addEquivMembers(children: Seq[LogicalPlan], condition: Expression): Seq[LogicalPlan] = {
+  private def addEquivMembers(condition: Expression): Unit = {
 
     val eqClassNew = new EquivalencesClass
 
-    eqClassNew.addEquivalence(condition, children)
+    eqClassNew.addEquivalence(condition)
 
     val mergedClasses =eqClasses.foldLeft(eqClassNew)(_.mergeWith(_))
 
@@ -148,7 +148,6 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       }
     }
     eqClasses+=mergedClasses
-    children
   }
 
 
@@ -333,7 +332,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   private def initEquivClasses: Unit = {
 
-    originalConditions.foreach(cond => addEquivMembers(baseRelations, cond))
+    originalConditions.foreach(cond => addEquivMembers(cond))
 
 
   }
@@ -342,10 +341,10 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
     List[Expression])] = {
     if (plans != Nil) {
       initEquivClasses
-      logInfo("*** Inititialized equivalenc classes ***")
+      logInfo("*** Inititialized equivalence classes ***")
       logInfo(eqClasses.toString())
       val permutations = permute(plans.toList.reverse)
-      logInfo("*** End equivalenc classes ***")
+      logInfo("*** End equivalence classes ***")
       logInfo(eqClasses.toString())
       permutations
     }
