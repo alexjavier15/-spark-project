@@ -108,6 +108,62 @@ abstract class Optimizer extends RuleExecutor[LogicalPlan] {
     }
   }
 }
+class MJoinGeneralOptimizer extends RuleExecutor[LogicalPlan] {
+  def batches: Seq[Batch] = {
+    // Technically some of the rules in Finish Analysis are not optimizer rules and belong more
+    // in the analyzer, because they are needed for correctness (e.g. ComputeCurrentTime).
+    // However, because we also use the analyzer to canonicalized queries (for view definition),
+    // we do not eliminate subqueries or compute current time in the analyzer.
+    Batch("Finish Analysis", Once,
+      EliminateSubqueryAliases,
+      ComputeCurrentTime,
+      DistinctAggregationRewriter) ::
+      Batch("Union", Once,
+      CombineUnions) ::
+      Batch("Replace Operators", FixedPoint(100),
+        ReplaceIntersectWithSemiJoin,
+        ReplaceDistinctWithAggregate) ::
+      Batch("Aggregate", FixedPoint(100),
+        RemoveLiteralFromGroupExpressions) ::
+      Batch("Operator Optimizations", FixedPoint(100),
+        // Operator push down
+        SetOperationPushDown,
+        SamplePushDown,
+        // Constant folding and strength reduction
+        NullPropagation,
+        OptimizeIn,
+        ConstantFolding,
+        LikeSimplification,
+        BooleanSimplification,
+        SimplifyConditionals,
+        RemoveDispensableExpressions,
+        PruneFilters,
+        SimplifyCasts,
+        SimplifyCaseConversionExpressions,
+        EliminateSerialization) ::
+      Batch("Decimal Optimizations", FixedPoint(100),
+        DecimalAggregates) ::
+      Batch("LocalRelation", FixedPoint(100),
+        ConvertToLocalRelation) :: Nil
+
+  }
+}
+class MJoinOrderingOptimizer extends RuleExecutor[LogicalPlan] {
+  def batches: Seq[Batch] = {
+    Batch("Operator Optimizations", FixedPoint(100),
+      // Operator push down
+      SetOperationPushDown,
+      SamplePushDown,
+      OuterJoinElimination,
+      PushPredicateThroughJoin,
+      PushPredicateThroughProject,
+      PushPredicateThroughGenerate,
+      PushPredicateThroughAggregate,
+      LimitPushDown,
+      ColumnPruning,
+      InferFiltersFromConstraints)::Nil
+  }
+}
 
 /**
   * Non-abstract representation of the standard Spark optimizing strategies
@@ -116,6 +172,8 @@ abstract class Optimizer extends RuleExecutor[LogicalPlan] {
   * specific rules go to the subclasses
   */
 object DefaultOptimizer extends Optimizer
+object MJoinGeneralOptimizer extends MJoinGeneralOptimizer
+object MJoinOrderingOptimizer extends MJoinOrderingOptimizer
 
 /**
  * Pushes operations down into a Sample.
