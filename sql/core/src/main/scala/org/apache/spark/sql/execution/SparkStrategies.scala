@@ -138,99 +138,97 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
     def apply(plan: LogicalPlan): Seq[SparkPlan] = {
 
 
-
       plan match {
 
-      // --- Inner joins --------------------------------------------------------------------------
+        // --- Inner joins --------------------------------------------------------------------------
+        case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
+          if (conf.iteratedHashJoinEnabled) =>
+          val buildSide = BuildRight
+          /* if (right.statistics.sizeInBytes <= left.statistics.sizeInBytes) {
+             BuildRight
+           } else {
+             BuildLeft
+           }*/
+          var simpleHash = plan.simpleHash
+          simpleHash += 37 * simpleHash + leftKeys.map(_.semanticHash()).sum
+          simpleHash += 37 * simpleHash + leftKeys.map(_.semanticHash()).sum
+          simpleHash += 37 * simpleHash + condition.map(_.semanticHash()).sum
+          if (conf.mJoinEnabled) {
 
-      case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, CanBroadcast(right)) =>
-        Seq(joins.BroadcastHashJoin(
-          leftKeys, rightKeys, Inner, BuildRight, condition, planLater(left), planLater(right)))
+            val optimizedPlan = SparkOptimizer.getOptimizedPlan(simpleHash)
+            if (optimizedPlan.isDefined)
+              return Seq(optimizedPlan.get)
 
-      case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, CanBroadcast(left), right) =>
-        Seq(joins.BroadcastHashJoin(
-          leftKeys, rightKeys, Inner, BuildLeft, condition, planLater(left), planLater(right)))
-
-      case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
-        if(conf.forceBroadcastJoinEnabled) =>
-        Seq(joins.BroadcastHashJoin(
-          leftKeys, rightKeys, Inner, BuildRight, condition, planLater(left), planLater(right)))
-
-      case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
-      if(conf.iteratedHashJoinEnabled) =>
-        val buildSide = BuildRight
-         /* if (right.statistics.sizeInBytes <= left.statistics.sizeInBytes) {
-            BuildRight
-          } else {
-            BuildLeft
-          }*/
-         var simpleHash = plan.simpleHash
-        simpleHash += 37 *simpleHash + leftKeys.map(_.semanticHash()).sum
-        simpleHash += 37 *simpleHash + leftKeys.map(_.semanticHash()).sum
-        simpleHash += 37 *simpleHash + condition.map(_.semanticHash()).sum
-        if(conf.mJoinEnabled){
-
-          val optimizedPlan = SparkOptimizer.getOptimizedPlan(simpleHash)
-          if(optimizedPlan.isDefined)
-            return  Seq(optimizedPlan.get)
-
-            }
-
-        val res =joins.ShuffledHashJoin(
-          leftKeys, rightKeys, Inner, buildSide, condition, planLater(left), planLater(right))
-        SparkOptimizer.addOptimzedPlan(simpleHash,res)
-        Seq(res)
-
-      case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
-        if !conf.preferSortMergeJoin && shouldShuffleHashJoin(left, right) ||
-          !RowOrdering.isOrderable(leftKeys) || conf.mJoinEnabled =>
-        val buildSide =
-          if (right.statistics.sizeInBytes <= left.statistics.sizeInBytes) {
-            BuildRight
-          } else {
-            BuildLeft
           }
-        Seq(joins.ShuffledHashJoin(
-          leftKeys, rightKeys, Inner, buildSide, condition, planLater(left), planLater(right)))
 
-      case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
-        if RowOrdering.isOrderable(leftKeys) =>
-        joins.SortMergeJoin(
-          leftKeys, rightKeys, Inner, condition, planLater(left), planLater(right)) :: Nil
+          val res = joins.ShuffledHashJoin(
+            leftKeys, rightKeys, Inner, buildSide, condition, planLater(left), planLater(right))
+          SparkOptimizer.addOptimzedPlan(simpleHash, res)
+          Seq(res)
 
-      // --- Outer joins --------------------------------------------------------------------------
+        case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, CanBroadcast(right)) =>
+          Seq(joins.BroadcastHashJoin(
+            leftKeys, rightKeys, Inner, BuildRight, condition, planLater(left), planLater(right)))
 
-      case ExtractEquiJoinKeys(
-          LeftOuter, leftKeys, rightKeys, condition, left, CanBroadcast(right)) =>
-        Seq(joins.BroadcastHashJoin(
-          leftKeys, rightKeys, LeftOuter, BuildRight, condition, planLater(left), planLater(right)))
+        case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, CanBroadcast(left), right) =>
+          Seq(joins.BroadcastHashJoin(
+            leftKeys, rightKeys, Inner, BuildLeft, condition, planLater(left), planLater(right)))
 
-      case ExtractEquiJoinKeys(
-          RightOuter, leftKeys, rightKeys, condition, CanBroadcast(left), right) =>
-        Seq(joins.BroadcastHashJoin(
-          leftKeys, rightKeys, RightOuter, BuildLeft, condition, planLater(left), planLater(right)))
+        case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
+          if (conf.forceBroadcastJoinEnabled) =>
+          Seq(joins.BroadcastHashJoin(
+            leftKeys, rightKeys, Inner, BuildRight, condition, planLater(left), planLater(right)))
 
-      case ExtractEquiJoinKeys(LeftOuter, leftKeys, rightKeys, condition, left, right)
-         if !conf.preferSortMergeJoin && canBuildHashMap(right) && muchSmaller(right, left) ||
-           !RowOrdering.isOrderable(leftKeys) =>
-        Seq(joins.ShuffledHashJoin(
-          leftKeys, rightKeys, LeftOuter, BuildRight, condition, planLater(left), planLater(right)))
+        case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
+          if !conf.preferSortMergeJoin && shouldShuffleHashJoin(left, right) ||
+            !RowOrdering.isOrderable(leftKeys) || conf.mJoinEnabled =>
+          val buildSide =
+            if (right.statistics.sizeInBytes <= left.statistics.sizeInBytes) {
+              BuildRight
+            } else {
+              BuildLeft
+            }
+          Seq(joins.ShuffledHashJoin(
+            leftKeys, rightKeys, Inner, buildSide, condition, planLater(left), planLater(right)))
 
-      case ExtractEquiJoinKeys(RightOuter, leftKeys, rightKeys, condition, left, right)
-         if !conf.preferSortMergeJoin && canBuildHashMap(left) && muchSmaller(left, right) ||
-           !RowOrdering.isOrderable(leftKeys) =>
-        Seq(joins.ShuffledHashJoin(
-          leftKeys, rightKeys, RightOuter, BuildLeft, condition, planLater(left), planLater(right)))
+        case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
+          if RowOrdering.isOrderable(leftKeys) =>
+          joins.SortMergeJoin(
+            leftKeys, rightKeys, Inner, condition, planLater(left), planLater(right)) :: Nil
 
-      case ExtractEquiJoinKeys(joinType, leftKeys, rightKeys, condition, left, right)
-        if RowOrdering.isOrderable(leftKeys) =>
-        joins.SortMergeJoin(
-          leftKeys, rightKeys, joinType, condition, planLater(left), planLater(right)) :: Nil
+        // --- Outer joins --------------------------------------------------------------------------
 
-      // --- Cases where this strategy does not apply ---------------------------------------------
+        case ExtractEquiJoinKeys(
+        LeftOuter, leftKeys, rightKeys, condition, left, CanBroadcast(right)) =>
+          Seq(joins.BroadcastHashJoin(
+            leftKeys, rightKeys, LeftOuter, BuildRight, condition, planLater(left), planLater(right)))
 
-      case _ => Nil
-    }
+        case ExtractEquiJoinKeys(
+        RightOuter, leftKeys, rightKeys, condition, CanBroadcast(left), right) =>
+          Seq(joins.BroadcastHashJoin(
+            leftKeys, rightKeys, RightOuter, BuildLeft, condition, planLater(left), planLater(right)))
+
+        case ExtractEquiJoinKeys(LeftOuter, leftKeys, rightKeys, condition, left, right)
+          if !conf.preferSortMergeJoin && canBuildHashMap(right) && muchSmaller(right, left) ||
+            !RowOrdering.isOrderable(leftKeys) =>
+          Seq(joins.ShuffledHashJoin(
+            leftKeys, rightKeys, LeftOuter, BuildRight, condition, planLater(left), planLater(right)))
+
+        case ExtractEquiJoinKeys(RightOuter, leftKeys, rightKeys, condition, left, right)
+          if !conf.preferSortMergeJoin && canBuildHashMap(left) && muchSmaller(left, right) ||
+            !RowOrdering.isOrderable(leftKeys) =>
+          Seq(joins.ShuffledHashJoin(
+            leftKeys, rightKeys, RightOuter, BuildLeft, condition, planLater(left), planLater(right)))
+
+        case ExtractEquiJoinKeys(joinType, leftKeys, rightKeys, condition, left, right)
+          if RowOrdering.isOrderable(leftKeys) =>
+          joins.SortMergeJoin(
+            leftKeys, rightKeys, joinType, condition, planLater(left), planLater(right)) :: Nil
+
+        // --- Cases where this strategy does not apply ---------------------------------------------
+
+        case _ => Nil
+      }
 
 
     }

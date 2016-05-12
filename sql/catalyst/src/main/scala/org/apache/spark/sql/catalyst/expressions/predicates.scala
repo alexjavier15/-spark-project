@@ -382,6 +382,7 @@ case class EqualTo(left: Expression, right: Expression) extends BinaryComparison
 
   override def symbol: String = "="
 
+
   protected override def nullSafeEval(input1: Any, input2: Any): Any = {
     if (left.dataType == FloatType) {
       Utils.nanSafeCompareFloats(input1.asInstanceOf[Float], input2.asInstanceOf[Float]) == 0

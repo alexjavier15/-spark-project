@@ -150,18 +150,47 @@ class MJoinGeneralOptimizer extends RuleExecutor[LogicalPlan] {
 }
 class MJoinOrderingOptimizer extends RuleExecutor[LogicalPlan] {
   def batches: Seq[Batch] = {
-    Batch("Operator Optimizations", FixedPoint(100),
-      // Operator push down
-      SetOperationPushDown,
-      SamplePushDown,
-      OuterJoinElimination,
-      PushPredicateThroughJoin,
-      PushPredicateThroughProject,
-      PushPredicateThroughGenerate,
-      PushPredicateThroughAggregate,
-      LimitPushDown,
-      ColumnPruning,
-      InferFiltersFromConstraints)::Nil
+    Batch("Union", Once,
+      CombineUnions) ::
+      Batch("Replace Operators", FixedPoint(50),
+        ReplaceIntersectWithSemiJoin,
+        ReplaceDistinctWithAggregate) ::
+      Batch("Aggregate", FixedPoint(50),
+        RemoveLiteralFromGroupExpressions) ::
+      Batch("Operator Optimizations", FixedPoint(50),
+        // Operator push down
+        SetOperationPushDown,
+        SamplePushDown,
+        OuterJoinElimination,
+        PushPredicateThroughJoin,
+        PushPredicateThroughProject,
+        PushPredicateThroughGenerate,
+        PushPredicateThroughAggregate,
+        LimitPushDown,
+        ColumnPruning,
+        InferFiltersFromConstraints,
+        // Operator combine
+        CollapseRepartition,
+        CollapseProject,
+        CombineFilters,
+        CombineLimits,
+        CombineUnions,
+        // Constant folding and strength reduction
+        NullPropagation,
+        OptimizeIn,
+        ConstantFolding,
+        LikeSimplification,
+        BooleanSimplification,
+        SimplifyConditionals,
+        RemoveDispensableExpressions,
+        PruneFilters,
+        SimplifyCasts,
+        SimplifyCaseConversionExpressions,
+        EliminateSerialization) ::
+      Batch("Decimal Optimizations", FixedPoint(100),
+        DecimalAggregates) ::
+      Batch("LocalRelation", FixedPoint(100),
+        ConvertToLocalRelation) :: Nil
   }
 }
 

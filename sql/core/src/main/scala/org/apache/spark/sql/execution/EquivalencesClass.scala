@@ -86,6 +86,8 @@ class EquivalencesClass extends Logging{
 
 
 
+
+
   private[this] def buildCondtions(leftMembers : Seq[EquivalenceMember],
     rightMembers :Seq[EquivalenceMember]): Seq[Expression] = {
 
@@ -93,11 +95,9 @@ class EquivalencesClass extends Logging{
              yield
                EqualTo (l.outputSet, r.outputSet).withNewChildren(Seq(l.outputSet, r.outputSet))
 
-
-
-
-
     }
+
+
 
   def canMergeWith(that: EquivalencesClass): Boolean =  this.members.isEmpty  ||
     that.members.isEmpty ||

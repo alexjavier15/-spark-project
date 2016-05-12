@@ -168,13 +168,15 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   }
 
 
-  private def createJoin(left: Seq[LogicalPlan], right: Seq[LogicalPlan]): Seq[Expression] = {
+  private def createJoinCondition(left: Seq[LogicalPlan], right: Seq[LogicalPlan]): Seq[Expression] = {
 
 
-    eqClasses.flatMap(eqClass =>
-      eqClass.generateJoinImpliedEqualities(left.toSet, right.toSet)).toSeq
+    val joinConditions = eqClasses.flatMap(eqClass =>
+      eqClass.generateJoinImpliedEqualities(left.toSet, right.toSet).headOption
+      ).toSeq
 
 
+    joinConditions
 
   }
 
@@ -187,11 +189,9 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   private def createOrderedJoin(input: Seq[LogicalPlan],
                                 conditions: Seq[Expression]): LogicalPlan = {
-
+    assert(input.size >= 2)
     if (input.size == 2) {
-      val condition = conditions.reduceLeftOption(And)
-      logical.Join(input.head, input(1), Inner, None)
-
+      Join(input(0), input(1), Inner, conditions.reduceLeftOption(And))
     } else {
       val left :: rest = input.toList
       // find out the first join that have at least one join condition
@@ -205,7 +205,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
       val joinedRefs = left.outputSet ++ right.outputSet
       val (joinConditions, others) = conditions.partition(_.references.subsetOf(joinedRefs))
-      val joined = logical.Join(left, right, Inner, None)
+      val joined = logical.Join(left, right, Inner, joinConditions.reduceLeftOption(And))
 
       // should not have reference to same logical plan
       createOrderedJoin(Seq(joined) ++ rest.filterNot(_ eq right), others)
@@ -213,6 +213,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
     }
 
   }
+
 
   private def withHolders(logicalPlan: LogicalPlan): LogicalPlan ={
 
@@ -243,6 +244,13 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       /*
       * TO-DO
       * */
+      println("infered plans : "+ inferedPlans.size)
+      for (plans <-  inferedPlans){
+        println(plans._1.simpleHash)
+        System.exit(0)
+
+      }
+
       val analyzedJoins = inferedPlans.map(subplan => optimizeSubplan(subplan._1, subplan._2))
       // We can gather one for all the leaves relations (we assume unique projections and
       // filter. Plan the original plan and get the result
@@ -280,7 +288,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       //val analyzed : Seq[LogicalPlan] =  plans map sqlContext.sessionState.analyzer.execute
      // plans foreach sqlContext.sessionState.analyzer.checkAnalysis
 
-
+    //plans map sqlContext.sessionState.optimizer.execute
     plans map JoinOptimizer.oOptimizer.execute
 
   }
@@ -321,12 +329,13 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
     // Create join
    // val joined = createOrderedJoin(plans0, conditions)
     // reduce join conditions to Filters
-    val filter = logical.Filter((conditions++_otherConditions).reduceLeftOption(And).get, joined)
+    val filter = logical.Filter((_otherConditions).reduceLeftOption(And).get, joined)
     // Add projection
     val dummy_plan = appendPlan[logical.Filter](originPlan, filter)
 
     // Analyze
     val optimizedPlan = optimizePlans(Seq(dummy_plan)).head
+
     // Roplace wil holders
    // val holdersReplaced = withHolders(optimizedPlan)
     // return the Join root plan (remove filter and projection nodes as they are the same
@@ -353,7 +362,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   }
 
-  private def doPermutations(plans: Seq[LogicalPlan]): List[(LogicalPlan,
+  private def  doPermutations(plans: Seq[LogicalPlan]): List[(LogicalPlan,
     List[Expression])] = {
     if (plans != Nil) {
       logDebug("****Extracted Conditions*****")
@@ -393,19 +402,26 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
     // special case lists of length 1 and 2 for better performance
     case t :: Nil => List((t, Nil))
     case t :: u :: Nil =>
-      val r_conditions = createJoin(Seq(t), Seq(u)).toList
-      val l_conditions = createJoin(Seq(u), Seq(t)).toList
+      val conditions1 = createJoinCondition(Seq(t), Seq(u)).toList
+      val conditions2 = createJoinCondition(Seq(u), Seq(t)).toList
 
-      r_conditions.map( condition =>  (logical.Join(t, u,Inner,None) , List(condition)))++
-        l_conditions.map( condition => (logical.Join(t, u,Inner,None) , List(condition)))
+      if (conditions1.nonEmpty && conditions2.nonEmpty) {
 
-
+        List((createOrderedJoin(Seq(t, u), conditions1), conditions1))
+      } else
+        Nil
 
     case _ =>
-      for ((y, ys) <- selections(xs); ps <- permute(ys); cond <-createJoin(Seq(ps._1), Seq(y)))
-      //   yield (y :: ps._1, inferJoinClauseEquiv1(y, ps._2.head) :: ps._2)
-        yield (logical.Join(ps._1, y,Inner,None), ps._2 :+ cond)
+      for ((y, ys) <- selections(xs); ps <- permute(ys); conditions <- Seq(createJoinCondition(Seq(ps._1), Seq(y))) if(conditions.nonEmpty))
+        yield (createOrderedJoin(Seq(ps._1,y),conditions ), ps._2 ++ conditions)
+
   }
 
+
+
+  //private[this] def CreateOptimizedReorderedPlan(plan : LogicalPlan , targetPlan : LogicalPlan): LogicalPlan = {
+
+//
+  //}
 
 }
