@@ -245,11 +245,6 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       * TO-DO
       * */
       println("infered plans : "+ inferedPlans.size)
-      for (plans <-  inferedPlans){
-        println(plans._1.simpleHash)
-        System.exit(0)
-
-      }
 
       val analyzedJoins = inferedPlans.map(subplan => optimizeSubplan(subplan._1, subplan._2))
       // We can gather one for all the leaves relations (we assume unique projections and
