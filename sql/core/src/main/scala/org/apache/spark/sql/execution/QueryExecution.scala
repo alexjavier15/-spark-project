@@ -56,7 +56,7 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
   }
 
   lazy val optimizedPlan: LogicalPlan =
-    joinAnalyzer.mJoinLogical.getOrElse( sqlContext.sessionState.optimizer.execute(withCachedData))
+    mJoinPlan.getOrElse( sqlContext.sessionState.optimizer.execute(withCachedData))
 
 
 
