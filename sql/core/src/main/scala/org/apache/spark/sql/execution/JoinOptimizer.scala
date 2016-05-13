@@ -52,7 +52,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
     //  Map every baseRealtion with its HadoopPfRelation
     val sources = baseRelations.map {
-      case relation @ logical.SubqueryAlias(_, l@LogicalRelation(h: HadoopPfRelation, _, _)) =>
+      case relation @LogicalRelation(h: HadoopPfRelation, _, _) =>
         (relation, Some(h))
       case relation => (relation, None)
     }

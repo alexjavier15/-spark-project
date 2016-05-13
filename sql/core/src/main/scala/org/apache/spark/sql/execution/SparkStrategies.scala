@@ -28,6 +28,7 @@ import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.sql.execution
 import org.apache.spark.sql.execution.columnar.{InMemoryColumnarTableScan, InMemoryRelation}
 import org.apache.spark.sql.execution.command.{DescribeCommand => RunnableDescribeCommand, _}
+import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 import org.apache.spark.sql.execution.datasources.{DescribeCommand => LogicalDescribeCommand, _}
 import org.apache.spark.sql.execution.exchange.ShuffleExchange
 import org.apache.spark.sql.execution.joins.{BuildLeft, BuildRight}
@@ -505,8 +506,9 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
       case logical.MJoin(child, baseRelations, subplans) =>
         joins.BroadcastMJoin(
           planLater(child),
-          baseRelations.map{ case(relation, chunks) =>
-            planLater(relation).simpleHash-> chunks.map(planLater(_))}.toMap,
+          baseRelations.map{ case( l@LogicalRelation(h: HadoopPfRelation, a, b), chunks) =>
+             planLater(l)
+              h.uniqueID -> chunks.map(planLater(_))}.toMap,
           Some(subplans.getOrElse(Seq()).map(planLater(_)))
 
 

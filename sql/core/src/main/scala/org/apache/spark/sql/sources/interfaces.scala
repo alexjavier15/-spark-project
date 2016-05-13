@@ -721,7 +721,7 @@ class PFileCatalog(
 
   def splitPFileCatalog() : Seq[PFileCatalog] = {
 
-    paths.map(path => new PFileCatalog(sqlContext , parameters,Seq(path),partitionSchema,pfFileDesc))
+    pfFileDesc.paths.map(path => new PFileCatalog(sqlContext , parameters,Seq(path),partitionSchema,pfFileDesc))
 
   }
 

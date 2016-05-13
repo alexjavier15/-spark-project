@@ -28,6 +28,7 @@ import org.apache.spark.storage.StorageLevel.MEMORY_AND_DISK
 import org.apache.spark.sql.catalyst.planning.ExtractEquiJoinKeys._
 import org.apache.spark.sql.catalyst.trees.TreeNode
 import org.apache.spark.sql.execution._
+import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 import org.apache.spark.sql.execution.exchange.EnsureRequirements
 
 import scala.collection.JavaConverters._
@@ -194,8 +195,8 @@ case class BroadcastMJoin(
 
         val newPlan = _bestPlan transform {
 
-          case scan@DataSourceScan(_, _, _, _) =>
-            val ds = subplan.get(scan.simpleHash).get
+          case scan@DataSourceScan(_,_,h :  HadoopPfRelation,_) =>
+            val ds = subplan.get(h.uniqueID).get
             getPartition0RDD(ds)
 
 

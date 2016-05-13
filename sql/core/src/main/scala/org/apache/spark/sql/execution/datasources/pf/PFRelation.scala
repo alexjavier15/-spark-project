@@ -1,9 +1,12 @@
 package org.apache.spark.sql.execution.datasources.pf
 
-import java.io.PrintStream
+import java.io.{File, PrintStream}
 import java.net.{InetAddress, Socket}
+import java.nio.file.{FileSystem, FileSystems}
 
+import org.apache.hadoop.fs.Path
 import org.apache.spark.SparkContext
+import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.execution.datasources.BucketSpec
@@ -37,8 +40,13 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
     fileFormat,
     options) with Serializable{
 
+  var uniqueID : Int = pFileDesc.hashCode()
   def hasParent : Boolean = parent!=null
-//  println("Initiating HaddopPfRelation for _" + this + " hashcode :" + this.hashCode)
+    println("Initiating HaddopPfRelation  ")
+    pFLocation.allFiles().foreach(f=>{
+      import sys.process._
+      "xattr -l "+ f.getPath.toString.substring(5) !})
+
 
   def isChild(relation : HadoopPfRelation): Boolean = hasParent && parent == relation
   def  splitHadoopPfRelation(): Seq[HadoopPfRelation] = {
@@ -224,7 +232,17 @@ case class PFileDesc(file_name: String,
 
   }
 
-  val paths: Seq[String] = chunkPFArray.map(chunk => chunk.data_location)
+  val paths: Seq[Path] = {
+
+    val paths0 = chunkPFArray.map(chunk => chunk.data_location)
+    paths0.flatMap { path =>
+      val hdfsPath = new Path(path)
+      val fs = hdfsPath.getFileSystem(SparkContext.getOrCreate().hadoopConfiguration)
+      val qualified = hdfsPath.makeQualified(fs.getUri, fs.getWorkingDirectory)
+      SparkHadoopUtil.get.globPathIfNecessary(qualified)
+    }
+
+  }
 
 
   def getChunksNum: Int = chunkPFArray.length

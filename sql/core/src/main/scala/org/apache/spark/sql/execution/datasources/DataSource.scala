@@ -207,7 +207,7 @@ case class DataSource(
 
           case (pf : pf.DefaultSource) =>
             val pfDesc =PFRelation.readPFileInfo(allPaths.head)
-            (pfDesc.paths,pfDesc.structType, Some(pfDesc))
+            (allPaths,pfDesc.structType, Some(pfDesc))
           case _ => (allPaths,userSpecifiedSchema, None)
         }
 
@@ -236,7 +236,7 @@ case class DataSource(
         val fileCatalog: FileCatalog =
           format match {
 
-            case (pf : pf.DefaultSource) => new PFileCatalog(sqlContext, options,globbedPaths, partitionSchema,pfDesc.get)
+            case (pf : pf.DefaultSource) => new PFileCatalog(sqlContext, options,pfDesc.get.paths, partitionSchema,pfDesc.get)
             case _ => new HDFSFileCatalog(sqlContext, options, globbedPaths, partitionSchema)
           }
         val dataSchema = schema.orElse {
