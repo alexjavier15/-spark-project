@@ -23,7 +23,7 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.planning.{GenericStrategy, _}
 import org.apache.spark.sql.catalyst.plans._
-import org.apache.spark.sql.catalyst.plans.logical.{BroadcastHint, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{BroadcastHint, Join, LogicalPlan}
 import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.sql.execution
 import org.apache.spark.sql.execution.columnar.{InMemoryColumnarTableScan, InMemoryRelation}
@@ -150,22 +150,23 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
            } else {
              BuildLeft
            }*/
-          var simpleHash = plan.simpleHash
+          /*var simpleHash = plan.simpleHash
           simpleHash += 37 * simpleHash + leftKeys.map(_.semanticHash()).sum
           simpleHash += 37 * simpleHash + leftKeys.map(_.semanticHash()).sum
-          simpleHash += 37 * simpleHash + condition.map(_.semanticHash()).sum
+          simpleHash += 37 * simpleHash + condition.map(_.semanticHash()).sum*
           if (conf.mJoinEnabled) {
 
             val optimizedPlan = SparkOptimizer.getOptimizedPlan(simpleHash)
             if (optimizedPlan.isDefined)
               return Seq(optimizedPlan.get)
 
-          }
-
+          )}*/
           val res = joins.ShuffledHashJoin(
             leftKeys, rightKeys, Inner, buildSide, condition, planLater(left), planLater(right))
-          SparkOptimizer.addOptimzedPlan(simpleHash, res)
-          Seq(res)
+          //SparkOptimizer.addOptimzedPlan(simpleHash, res)
+          assert(res.semanticHash==plan.semanticHash)
+
+            Seq(res)
 
         case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, CanBroadcast(right)) =>
           Seq(joins.BroadcastHashJoin(
@@ -509,7 +510,7 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           baseRelations.map{ case( l@LogicalRelation(h: HadoopPfRelation, a, b), chunks) =>
              planLater(l)
               h.uniqueID -> chunks.map(planLater(_))}.toMap,
-          Some(subplans.getOrElse(Seq()).map(planLater(_)))
+          subplans
 
 
         )::Nil

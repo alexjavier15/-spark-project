@@ -31,14 +31,14 @@ import org.apache.spark.sql.sources.BaseRelation
  * this purpose.  See https://issues.apache.org/jira/browse/SPARK-10741 for more details.
  */
 case class LogicalRelation(
-    relation: BaseRelation,
-    expectedOutputAttributes: Option[Seq[Attribute]] = None,
-    metastoreTableIdentifier: Option[TableIdentifier] = None)
+                            @transient relation: BaseRelation,
+                            expectedOutputAttributes: Option[Seq[Attribute]] = None,
+                            metastoreTableIdentifier: Option[TableIdentifier] = None)
   extends LeafNode with MultiInstanceRelation {
 
 
   override def simpleHash : Int = relation.simpleHash
-
+  override def semanticHash : Int = relation.semanticHash
   override val output: Seq[AttributeReference] = {
     val attrs = relation.schema.toAttributes
 

@@ -230,6 +230,9 @@ abstract class BaseRelation {
   def simpleHash : Int= {
     throw new UnsupportedOperationException(s"BaseRelation does not implement simpleHash")
   }
+  def semanticHash : Int= {
+    throw new UnsupportedOperationException(s"BaseRelation does not implement semanticHash")
+  }
 }
 
 /**
@@ -396,13 +399,15 @@ abstract class OutputWriter {
  */
 case class HadoopFsRelation(
     sqlContext: SQLContext,
-    location: FileCatalog,
+    @transient location: FileCatalog,
     partitionSchema: StructType,
     dataSchema: StructType,
     bucketSpec: Option[BucketSpec],
     fileFormat: FileFormat,
     options: Map[String, String]) extends BaseRelation with FileRelation {
 
+  override def simpleHash:Int = location.hashCode()
+  override def semanticHash:Int = location.hashCode()
   val schema: StructType = {
     val dataSchemaColumnNames = dataSchema.map(_.name.toLowerCase).toSet
     StructType(dataSchema ++ partitionSchema.filterNot { column =>
@@ -415,7 +420,8 @@ case class HadoopFsRelation(
   def partitionSpec: PartitionSpec = location.partitionSpec()
 
   def refresh(): Unit = location.refresh()
-  override def simpleHash():Int = location.hashCode()
+
+
   override def toString: String =
     s"$fileFormat part: ${partitionSchema.simpleString}, data: ${dataSchema.simpleString}"
 

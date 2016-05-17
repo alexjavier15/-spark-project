@@ -47,6 +47,10 @@ abstract class LogicalPlan extends QueryPlan[LogicalPlan] with Logging {
   def simpleHash : Int= {
     throw new UnsupportedOperationException(s"$nodeName does not implement simpleHash")
   }
+
+  def semanticHash : Int ={
+    throw new UnsupportedOperationException(s"$nodeName does not implement semanticHash")
+  }
   /**
    * Returns a copy of this node where `rule` has been recursively applied first to all of its
    * children and then itself (post-order). When `rule` does not apply to a given node, it is left
@@ -275,6 +279,7 @@ abstract class LogicalPlan extends QueryPlan[LogicalPlan] with Logging {
 abstract class LeafNode extends LogicalPlan {
   override def children: Seq[LogicalPlan] = Nil
   override def producedAttributes: AttributeSet = outputSet
+
 }
 
 /**
@@ -284,7 +289,14 @@ abstract class UnaryNode extends LogicalPlan {
   def child: LogicalPlan
 
   override def children: Seq[LogicalPlan] = child :: Nil
-  override def simpleHash: Int =  child.simpleHash
+
+  override def simpleHash: Int =  child match {
+    case l : LeafNode => l.semanticHash
+    case _ =>child.simpleHash
+
+  }
+
+  override def semanticHash: Int =  child.semanticHash
 
 
   /**
@@ -334,6 +346,13 @@ abstract class BinaryNode extends LogicalPlan {
     var h = 17
     h = h * 37 + left.simpleHash
     h = h * 37 + right.simpleHash
+    h
+
+  }
+  override def semanticHash : Int ={
+
+    var h = 17
+    h = h * 37 + left.simpleHash + right.simpleHash
     h
 
   }

@@ -131,8 +131,8 @@ private[sql] case class DataSourceScan(
   extends LeafNode with CodegenSupport {
 
 
-  val hashcode : Int = relation.hashCode
-
+  override def simpleHash : Int = relation.simpleHash
+  override def semanticHash : Int = relation.semanticHash
  // println("Initiating datasource scan for _" + this + " hashcode :" + hashcode)
 
   /*override def hashCode(): Int = hashcode
@@ -147,8 +147,6 @@ private[sql] case class DataSourceScan(
   }
   }*/
 
-
-  override def simpleHash : Int = hashcode
 
   override val nodeName: String = relation.toString
 

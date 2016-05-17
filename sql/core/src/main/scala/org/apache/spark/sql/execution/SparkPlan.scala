@@ -100,7 +100,7 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
  def simpleHash : Int= {
    throw new UnsupportedOperationException(s"$nodeName does not implement simpleHash")
  }
-  def semanticHash : Int= {
+ def semanticHash : Int= {
     throw new UnsupportedOperationException(s"$nodeName does not implement semanticHash")
   }
 
@@ -491,7 +491,8 @@ private[sql] trait LeafNode extends SparkPlan {
   override def producedAttributes: AttributeSet = outputSet
   override def planCost(): Long =  getOutputRows
   override def numLeaves: Long = 1L
-  override def semanticHash: Int =  simpleHash
+  override def semanticHash: Int =  this.simpleHash
+  override def selectivity() : Double = 1.0
 }
 
 private[sql] trait UnaryNode extends SparkPlan {
@@ -506,7 +507,11 @@ private[sql] trait UnaryNode extends SparkPlan {
 
   override def numLeaves: Long = child.numLeaves
 
-  override def simpleHash: Int =  child.simpleHash
+  override def  simpleHash: Int =    child match {
+    case l : LeafNode => l.semanticHash
+    case _ =>child.simpleHash
+
+  }
 
   override def semanticHash: Int =  child.semanticHash
 

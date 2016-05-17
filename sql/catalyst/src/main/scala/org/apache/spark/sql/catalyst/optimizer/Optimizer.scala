@@ -148,6 +148,11 @@ class MJoinGeneralOptimizer extends RuleExecutor[LogicalPlan] {
 
   }
 }
+class MJoinPushPredicateThroughJoin extends RuleExecutor[LogicalPlan] {
+  def batches: Seq[Batch] = { Seq(Batch("Operator Optimizations", FixedPoint(50),
+  PushPredicateThroughJoin))
+    }
+  }
 class MJoinOrderingOptimizer extends RuleExecutor[LogicalPlan] {
   def batches: Seq[Batch] = {
     Batch("Union", Once,

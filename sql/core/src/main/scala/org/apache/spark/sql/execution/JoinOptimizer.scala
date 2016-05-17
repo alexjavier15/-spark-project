@@ -3,7 +3,7 @@ package org.apache.spark.sql.execution
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{ExperimentalMethods, SQLContext}
 import org.apache.spark.sql.catalyst.expressions.{And, Expression, PredicateHelper}
-import org.apache.spark.sql.catalyst.optimizer.{MJoinGeneralOptimizer, MJoinOrderingOptimizer, Optimizer}
+import org.apache.spark.sql.catalyst.optimizer.{MJoinGeneralOptimizer, MJoinOrderingOptimizer, MJoinPushPredicateThroughJoin, Optimizer}
 import org.apache.spark.sql.catalyst.plans.Inner
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan}
@@ -30,6 +30,16 @@ object JoinOptimizer{
 
 
 
+  def findRootJoin(plan: LogicalPlan): LogicalPlan = {
+
+    plan match {
+
+      case j@Join(_, _, _, _) => j
+      case node: logical.UnaryNode => findRootJoin(node.child)
+      case _ => throw new IllegalArgumentException("Only UnaryNode must be above a Join")
+    }
+
+  }
 
 }
 
@@ -66,20 +76,10 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   }
 
-  private  def findRootJoin(plan: LogicalPlan): LogicalPlan = {
-
-    plan match {
-
-      case j@Join(_, _, _, _) => j
-      case node: logical.UnaryNode => findRootJoin(node.child)
-      case _ => throw new IllegalArgumentException("Only UnaryNode must be above a Join")
-    }
-
-  }
   private def splitRelation(plan: LogicalPlan, relation: Option[HadoopPfRelation]): Seq[LogicalPlan] = {
 
 
-    relation match {
+   val res = relation match {
       case None => Seq(plan)
       case Some(h) =>
         val splittedHPFRelation = h.splitHadoopPfRelation()
@@ -93,6 +93,9 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
        }
           )
     }
+
+    assert(res.forall(r => r.semanticHash == plan.semanticHash) )
+    res
   }
 
   /**
@@ -260,15 +263,16 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
         ( optimizePlans(Seq(relations._1)).head ,optimizePlans(relations._2)))
       //Experimental:
 
-      val optimzedOriginal = optimizePlans(Seq(originPlan))
+      val optimzedOriginal =sqlContext.sessionState.optimizer.execute(originPlan)
+      val rootJoin = JoinOptimizer.findRootJoin(optimzedOriginal)
     //  val union = sqlContext.sessionState.analyzer.execute(logical.Union(chunkedOriginalJoin))
     //  val analyzedUnion = sqlContext.sessionState.optimizer.execute(union)
-      val mJoin = logical.MJoin(findRootJoin(optimzedOriginal.head), analyzedChunkedRelations, Some(analyzedJoins))
+      val mJoin = logical.MJoin(rootJoin, analyzedChunkedRelations, Some(analyzedJoins.::(rootJoin)))
 
 
 
       // make a copy of all plans above the root join and append the MJoin plan
-     val res =appendPlan[logical.Join](optimzedOriginal.head, mJoin)
+     val res =appendPlan[logical.Join](optimzedOriginal, mJoin)
 
      Some(res)
 
@@ -321,21 +325,17 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   private def optimizeSubplan(joined: LogicalPlan, conditions: Seq[Expression]): LogicalPlan = {
 
-    // Create join
-   // val joined = createOrderedJoin(plans0, conditions)
-    // reduce join conditions to Filters
-    val filter = logical.Filter((_otherConditions).reduceLeftOption(And).get, joined)
-    // Add projection
-    val dummy_plan = appendPlan[logical.Filter](originPlan, filter)
+    val otherFilters = _otherConditions.reduceLeftOption(And)
 
-    // Analyze
-    val optimizedPlan = optimizePlans(Seq(dummy_plan)).head
+    otherFilters match {
 
-    // Roplace wil holders
-   // val holdersReplaced = withHolders(optimizedPlan)
-    // return the Join root plan (remove filter and projection nodes as they are the same
-    // for each subplan
-    findRootJoin(optimizedPlan)
+      case Some(f) =>
+        val filter = logical.Filter(otherFilters.get, joined)
+        appendPlan[logical.Filter](originPlan, filter)
+      case None =>
+        appendPlan[logical.Join](originPlan, joined)
+    }
+
 
   }
 

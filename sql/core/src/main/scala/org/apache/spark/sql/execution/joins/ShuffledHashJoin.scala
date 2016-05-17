@@ -19,7 +19,7 @@ package org.apache.spark.sql.execution.joins
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{Expression, JoinedRow}
+import org.apache.spark.sql.catalyst.expressions.{And, EqualTo, Expression, JoinedRow}
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.sql.execution.{BinaryNode, SparkPlan}
@@ -57,6 +57,27 @@ case class ShuffledHashJoin(
 
   override def requiredChildDistribution: Seq[Distribution] = //UnspecifiedDistribution :: UnspecifiedDistribution :: Nil
     ClusteredDistribution(leftKeys) :: ClusteredDistribution(rightKeys) :: Nil
+
+
+  override def simpleHash: Int = {
+    var h = 17
+    h = h * 37 + left.simpleHash
+    h = h * 37 + right.simpleHash
+    h = h * 37 +  Some((leftKeys zip rightKeys).map { case (l, r) => EqualTo(l, r) }.
+      reduceLeft(And)).map(_.semanticHash()).sum
+    h
+  }
+
+
+  override def semanticHash: Int = {
+    var h = 17
+    h = h * 37 + left.semanticHash + right.semanticHash
+    h = h * 37 +  Some((leftKeys zip rightKeys).map { case (l, r) => EqualTo(l, r) }.
+        reduceLeft(And)).map(_.semanticHash()).sum
+
+    h
+
+  }
 
   protected override def doExecute(): RDD[InternalRow] = {
     val numOutputRows = longMetric("numOutputRows")

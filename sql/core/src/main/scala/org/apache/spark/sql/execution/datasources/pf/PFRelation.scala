@@ -24,7 +24,7 @@ import scala.io.Source._
   */
 
 class HadoopPfRelation(override val sqlContext: SQLContext,
-                            pFLocation: PFileCatalog,
+                       @transient pFLocation: PFileCatalog,
                             partitionSchema: StructType,
                             dataSchema: StructType,
                             bucketSpec: Option[BucketSpec],
@@ -56,12 +56,15 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
 
   }
 
-  override def hashCode(): Int = pFileDesc.hashCode()
-  override def simpleHash(): Int = {
+
+  override def simpleHash: Int = {
     var h = 17
-    h = 37 * super.simpleHash() + pFileDesc.hashCode()
+    h = 37 * location.hashCode() + pFileDesc.hashCode()
     h
   }
+
+  override def semanticHash: Int = pFileDesc.hashCode()
+
   override def equals(o: scala.Any): Boolean = {
     o match{
     case h : HadoopPfRelation if  pFileDesc.equals(h.pFileDesc) &&
