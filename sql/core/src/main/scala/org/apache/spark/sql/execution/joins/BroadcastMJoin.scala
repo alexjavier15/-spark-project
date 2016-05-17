@@ -240,7 +240,7 @@ case class BroadcastMJoin(
 
         if (sqlContext.conf.mJoinSamplingEnabled ) {
 
-          rdd.count()
+          rdd.countApprox(120000,0.95)
 
           executedPlan.printMetrics
           tested = true
