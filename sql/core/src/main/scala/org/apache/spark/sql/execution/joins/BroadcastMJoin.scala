@@ -175,7 +175,7 @@ case class BroadcastMJoin(
       case scan@DataSourceScan(o, rdd, rel, metadata) =>
         val withReplace = false
 
-        DataSourceScan(o, rdd.sample(withReplace,0.1,seed), rel, metadata)
+        DataSourceScan(o, rdd.sample(withReplace,0.2,seed), rel, metadata)
       case _ => plan
     }
   }
