@@ -100,8 +100,8 @@ case class BroadcastMJoin(
     */
   override protected def doPrepare(): Unit = {
 
-    logInfo(child.toString)
-    System.exit(0)
+    //logInfo(child.toString)
+    //System.exit(0)
 
     subplans.getOrElse(Seq()).foreach( plan => {
         val selPlan = SelectivityPlan(plan)
@@ -178,9 +178,10 @@ case class BroadcastMJoin(
     val seed : Long = System.currentTimeMillis()
 
     plan match {
-      case scan@DataSourceScan(o, rdd, rel, metadata) =>
+      case f @ Filter(_,child) => plan
+      /*case scan@DataSourceScan(o, rdd, rel, metadata) =>
         val withReplace = false
-        DataSourceScan(o, rdd.sample(withReplace,0.2,seed), rel, metadata)
+        DataSourceScan(o, rdd.sample(withReplace,0.2,seed), rel, metadata)*/
       case _ => plan
     }
   }
@@ -216,13 +217,16 @@ case class BroadcastMJoin(
         logInfo("BEFORE TRANSFORMATION:")
         logInfo(_bestPlan.toString)
 
-        val newPlan = _bestPlan transform {
+        val newPlan = _bestPlan transformUp {
+
+          case filter @ Filter(_ ,  scan@DataSourceScan(_,_,h :  HadoopPfRelation,_)  )=>
+               Sample(0.00,0.05,false,System.currentTimeMillis(),filter)
 
           case scan@DataSourceScan(_,_,h :  HadoopPfRelation,_) =>
             val ds = subplan.get(h.semanticHash).get
             assert(ds.semanticHash == scan.semanticHash  )
-            getPartition0RDD(ds)
-
+           // getPartition0RDD(ds)
+            ds
 
         }
 
@@ -243,6 +247,7 @@ case class BroadcastMJoin(
           logInfo("Cost :" + executedPlan.planCost)
           updateSelectivities(executedPlan)
           updateStatisticsTo(_bestPlan)
+          System.exit(0)
           rdd.unpersist(false)
           /*val childPlans = child.extractNodes[DataSourceScan]
           val newPlan = _bestPlan transform {
@@ -430,8 +435,11 @@ object SelectivityPlan {
             selPlan.setRowsFromExecution(join.getOutputRows)
             selPlan.setNumPartitionsFromExecution(sparkPlan.getNumPartitions)
         }
+      case f@Filter(condition,child0@DataSourceScan(_, _, _, _)) =>
+        _selectivityPlanNodes.get(f.semanticHash).get.setRowsFromExecution(f.getOutputRows)
 
       case u: UnaryNode => updatefromExecution(u.child)
+
 
       case u: LeafNode => _selectivityPlanNodes.get(u.semanticHash).get.setRowsFromExecution(u.getOutputRows)
 
