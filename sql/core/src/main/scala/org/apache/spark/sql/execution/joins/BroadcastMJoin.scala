@@ -247,7 +247,6 @@ case class BroadcastMJoin(
           logInfo("Cost :" + executedPlan.planCost)
           updateSelectivities(executedPlan)
           updateStatisticsTo(_bestPlan)
-          System.exit(0)
           rdd.unpersist(false)
           /*val childPlans = child.extractNodes[DataSourceScan]
           val newPlan = _bestPlan transform {
