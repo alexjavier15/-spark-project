@@ -178,7 +178,6 @@ case class BroadcastMJoin(
     plan match {
       case scan@DataSourceScan(o, rdd, rel, metadata) =>
         val withReplace = false
-
         DataSourceScan(o, rdd.sample(withReplace,0.2,seed), rel, metadata)
       case _ => plan
     }
@@ -638,9 +637,9 @@ case class HashCondition(left : SelectivityPlan,
 
     var startup_cost = right.planCost + left.planCost
     startup_cost += (CPU_OPERATOR_COST  + CPU_TUPLE_COST) * right.rows
-    var run_cost = HASH_QUAL_COST * left.rows * right.rows * 2 * 0.75
+    var run_cost = HASH_QUAL_COST * left.rows * right.rows * 0.75
     run_cost += CPU_OPERATOR_COST * left.rows
-    run_cost += CPU_TUPLE_COST * rows
+    run_cost += (CPU_TUPLE_COST + 1 )* rows
     startup_cost + run_cost
 
   }
