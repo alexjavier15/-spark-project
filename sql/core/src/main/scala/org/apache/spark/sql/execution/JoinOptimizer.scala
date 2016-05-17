@@ -19,7 +19,6 @@ import scala.reflect.ClassTag
 
 object JoinOptimizer{
   val gOptimizer = new MJoinGeneralOptimizer
-  val oOptimizer = new MJoinOrderingOptimizer
   var joinOptimizer : JoinOptimizer = null
 
   def apply(originPlan: LogicalPlan, sqlContext: SQLContext) : JoinOptimizer ={
@@ -309,19 +308,18 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
         case Some(p) => p
         case None =>
           logInfo("Not found original Order. Getting random")
-          val r = scala.util.Random
+          val r = scala.util.RandomoriginPlan
           val planId =  r.nextInt(analyzedJoins.size)
           analyzedJoins(planId)
       }*/
 
 
-
+      logInfo(toExecute.toString)
       val optimzedOriginal =sqlContext.sessionState.optimizer.execute(toExecute)
 
 
 
-
-
+      logInfo(optimzedOriginal.toString)
 
       val rootJoin = JoinOptimizer.findRootJoin(optimzedOriginal)
     //  val union = sqlContext.sessionState.analyzer.execute(logical.Union(chunkedOriginalJoin))
@@ -333,7 +331,9 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       // make a copy of all plans above the root join and append the MJoin plan
      val res =appendPlan[logical.Join](optimzedOriginal, mJoin)
 
+
      Some(res)
+
 
 
 
@@ -347,7 +347,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
      // plans foreach sqlContext.sessionState.analyzer.checkAnalysis
 
     //plans map sqlContext.sessionState.optimizer.execute
-    plans map JoinOptimizer.oOptimizer.execute
+    plans map sqlContext.sessionState.optimizer.execute
 
   }
 

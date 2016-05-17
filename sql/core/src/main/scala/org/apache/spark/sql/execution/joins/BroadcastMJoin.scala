@@ -100,8 +100,10 @@ case class BroadcastMJoin(
     */
   override protected def doPrepare(): Unit = {
 
+    logInfo(child.toString)
+    System.exit(0)
 
-      subplans.getOrElse(Seq()).foreach( plan => {
+    subplans.getOrElse(Seq()).foreach( plan => {
         val selPlan = SelectivityPlan(plan)
        SelectivityPlan._selectivityPlanRoots+=(plan.simpleHash->selPlan)
 
@@ -162,7 +164,7 @@ case class BroadcastMJoin(
 
 
     _bestPlan= queryExecution.sqlContext.sessionState.planner.
-      plan(JoinOptimizer.oOptimizer.execute(_bestLogical)).next
+      plan(queryExecution.sqlContext.sessionState.optimizer.execute(_bestLogical)).next
     logInfo("****New Optimized plan****")
     logInfo(_bestPlan.toString())
     logInfo("****SelectivityPlan filters****")

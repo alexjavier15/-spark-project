@@ -44,10 +44,11 @@ object SparkOptimizer {
 
   }
   def getOptimizedPlan(simpleHash : Int): Option[SparkPlan] = {
-    val res =_optimizedPlans.get(simpleHash)
+   /* val res =_optimizedPlans.get(simpleHash)
     if(res.isDefined)
       _hits+=1
-    res
+    res*/
+    None
 
   }
 

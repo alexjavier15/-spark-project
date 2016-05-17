@@ -90,20 +90,7 @@ private[sql] object DataSourceAnalysis extends Rule[LogicalPlan] {
 private[sql] object DataSourceStrategy extends Strategy with Logging {
   def apply(plan: LogicalPlan): Seq[execution.SparkPlan] = {
 
-    if (SQLContext.getActive().get.conf.mJoinEnabled) {
-
-      plan match {
-        case l@LogicalRelation(t: HadoopPfRelation, _, _) =>
-          val optimizedPlan = SparkOptimizer.getOptimizedPlan (plan.simpleHash)
-          if (optimizedPlan.isDefined)
-            return Seq (optimizedPlan.get)
-        case _ =>
-      }
-
-
-    }
-
-val res =    plan match {
+    plan match {
 
 
       /**
@@ -297,13 +284,7 @@ val res =    plan match {
 
       case _ => Nil
     }
-    if (SQLContext.getActive().get.conf.mJoinEnabled && res != Nil) {
-      plan match {
-        case l@LogicalRelation(t: HadoopPfRelation, _, _) => SparkOptimizer.addOptimzedPlan(plan.simpleHash, res.head)
-        case _ =>
-      }
-    }
-    res
+
   }
   private def buildPartitionedTableScan(
       logicalRelation: LogicalRelation,

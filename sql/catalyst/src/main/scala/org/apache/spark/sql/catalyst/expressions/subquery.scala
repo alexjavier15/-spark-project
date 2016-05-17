@@ -44,6 +44,14 @@ abstract class SubqueryExpression extends LeafExpression {
   def withNewPlan(plan: LogicalPlan): SubqueryExpression
 }
 
+object SubqueryExpression {
+  def hasCorrelatedSubquery(e: Expression): Boolean = {
+    e.find {
+      case e: SubqueryExpression if e.children.nonEmpty => true
+      case _ => false
+    }.isDefined
+  }
+}
 /**
  * A subquery that will return only one row and one column. This will be converted into a physical
  * scalar subquery during planning.

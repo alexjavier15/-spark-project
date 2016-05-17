@@ -1,3 +1,4 @@
+
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -44,63 +45,63 @@ abstract class Optimizer extends RuleExecutor[LogicalPlan] {
       EliminateSubqueryAliases,
       ComputeCurrentTime,
       DistinctAggregationRewriter) ::
-    //////////////////////////////////////////////////////////////////////////////////////////
-    // Optimizer rules start here
-    //////////////////////////////////////////////////////////////////////////////////////////
-    // - Do the first call of CombineUnions before starting the major Optimizer rules,
-    //   since it can reduce the number of iteration and the other rules could add/move
-    //   extra operators between two adjacent Union operators.
-    // - Call CombineUnions again in Batch("Operator Optimizations"),
-    //   since the other rules might make two separate Unions operators adjacent.
-    Batch("Union", Once,
-      CombineUnions) ::
-    Batch("Replace Operators", FixedPoint(100),
-      ReplaceIntersectWithSemiJoin,
-      ReplaceDistinctWithAggregate) ::
-    Batch("Aggregate", FixedPoint(100),
-      RemoveLiteralFromGroupExpressions) ::
-    Batch("Operator Optimizations", FixedPoint(100),
-      // Operator push down
-      SetOperationPushDown,
-      SamplePushDown,
-      ReorderJoin,
-      OuterJoinElimination,
-      PushPredicateThroughJoin,
-      PushPredicateThroughProject,
-      PushPredicateThroughGenerate,
-      PushPredicateThroughAggregate,
-      LimitPushDown,
-      ColumnPruning,
-      InferFiltersFromConstraints,
-      // Operator combine
-      CollapseRepartition,
-      CollapseProject,
-      CombineFilters,
-      CombineLimits,
-      CombineUnions,
-      // Constant folding and strength reduction
-      NullPropagation,
-      OptimizeIn,
-      ConstantFolding,
-      LikeSimplification,
-      BooleanSimplification,
-      SimplifyConditionals,
-      RemoveDispensableExpressions,
-      PruneFilters,
-      SimplifyCasts,
-      SimplifyCaseConversionExpressions,
-      EliminateSerialization) ::
-    Batch("Decimal Optimizations", FixedPoint(100),
-      DecimalAggregates) ::
-    Batch("LocalRelation", FixedPoint(100),
-      ConvertToLocalRelation) ::
-    Batch("Subquery", Once,
-      OptimizeSubqueries) :: Nil
+      //////////////////////////////////////////////////////////////////////////////////////////
+      // Optimizer rules start here
+      //////////////////////////////////////////////////////////////////////////////////////////
+      // - Do the first call of CombineUnions before starting the major Optimizer rules,
+      //   since it can reduce the number of iteration and the other rules could add/move
+      //   extra operators between two adjacent Union operators.
+      // - Call CombineUnions again in Batch("Operator Optimizations"),
+      //   since the other rules might make two separate Unions operators adjacent.
+      Batch("Union", Once,
+        CombineUnions) ::
+      Batch("Replace Operators", FixedPoint(100),
+        ReplaceIntersectWithSemiJoin,
+        ReplaceDistinctWithAggregate) ::
+      Batch("Aggregate", FixedPoint(100),
+        RemoveLiteralFromGroupExpressions) ::
+      Batch("Operator Optimizations", FixedPoint(100),
+        // Operator push down
+        SetOperationPushDown,
+        SamplePushDown,
+        ReorderJoin,
+        OuterJoinElimination,
+        PushPredicateThroughJoin,
+        PushPredicateThroughProject,
+        PushPredicateThroughGenerate,
+        PushPredicateThroughAggregate,
+        LimitPushDown,
+        ColumnPruning,
+        InferFiltersFromConstraints,
+        // Operator combine
+        CollapseRepartition,
+        CollapseProject,
+        CombineFilters,
+        CombineLimits,
+        CombineUnions,
+        // Constant folding and strength reduction
+        NullPropagation,
+        OptimizeIn,
+        ConstantFolding,
+        LikeSimplification,
+        BooleanSimplification,
+        SimplifyConditionals,
+        RemoveDispensableExpressions,
+        PruneFilters,
+        SimplifyCasts,
+        SimplifyCaseConversionExpressions,
+        EliminateSerialization) ::
+      Batch("Decimal Optimizations", FixedPoint(100),
+        DecimalAggregates) ::
+      Batch("LocalRelation", FixedPoint(100),
+        ConvertToLocalRelation) ::
+      Batch("Subquery", Once,
+        OptimizeSubqueries) :: Nil
   }
 
   /**
-   * Optimize all the subqueries inside expression.
-   */
+    * Optimize all the subqueries inside expression.
+    */
   object OptimizeSubqueries extends Rule[LogicalPlan] {
     def apply(plan: LogicalPlan): LogicalPlan = plan transformAllExpressions {
       case subquery: SubqueryExpression =>
@@ -119,7 +120,7 @@ class MJoinGeneralOptimizer extends RuleExecutor[LogicalPlan] {
       ComputeCurrentTime,
       DistinctAggregationRewriter) ::
       Batch("Union", Once,
-      CombineUnions) ::
+        CombineUnions) ::
       Batch("Replace Operators", FixedPoint(100),
         ReplaceIntersectWithSemiJoin,
         ReplaceDistinctWithAggregate) ::
@@ -150,9 +151,9 @@ class MJoinGeneralOptimizer extends RuleExecutor[LogicalPlan] {
 }
 class MJoinPushPredicateThroughJoin extends RuleExecutor[LogicalPlan] {
   def batches: Seq[Batch] = { Seq(Batch("Operator Optimizations", FixedPoint(50),
-  PushPredicateThroughJoin))
-    }
+    PushPredicateThroughJoin))
   }
+}
 class MJoinOrderingOptimizer extends RuleExecutor[LogicalPlan] {
   def batches: Seq[Batch] = {
     Batch("Union", Once,
@@ -210,8 +211,8 @@ object MJoinGeneralOptimizer extends MJoinGeneralOptimizer
 object MJoinOrderingOptimizer extends MJoinOrderingOptimizer
 
 /**
- * Pushes operations down into a Sample.
- */
+  * Pushes operations down into a Sample.
+  */
 object SamplePushDown extends Rule[LogicalPlan] {
 
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
@@ -223,14 +224,14 @@ object SamplePushDown extends Rule[LogicalPlan] {
 }
 
 /**
- * Removes cases where we are unnecessarily going between the object and serialized (InternalRow)
- * representation of data item.  For example back to back map operations.
- */
+  * Removes cases where we are unnecessarily going between the object and serialized (InternalRow)
+  * representation of data item.  For example back to back map operations.
+  */
 object EliminateSerialization extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case m @ MapPartitions(_, deserializer, _, child: ObjectOperator)
-        if !deserializer.isInstanceOf[Attribute] &&
-          deserializer.dataType == child.outputObject.dataType =>
+      if !deserializer.isInstanceOf[Attribute] &&
+        deserializer.dataType == child.outputObject.dataType =>
       val childWithoutSerialization = child.withObjectOutput
       m.copy(
         deserializer = childWithoutSerialization.output.head,
@@ -239,8 +240,8 @@ object EliminateSerialization extends Rule[LogicalPlan] {
 }
 
 /**
- * Pushes down [[LocalLimit]] beneath UNION ALL and beneath the streamed inputs of outer joins.
- */
+  * Pushes down [[LocalLimit]] beneath UNION ALL and beneath the streamed inputs of outer joins.
+  */
 object LimitPushDown extends Rule[LogicalPlan] {
 
   private def stripGlobalLimitIfPresent(plan: LogicalPlan): LogicalPlan = {
@@ -302,33 +303,33 @@ object LimitPushDown extends Rule[LogicalPlan] {
 }
 
 /**
- * Pushes certain operations to both sides of a Union or Except operator.
- * Operations that are safe to pushdown are listed as follows.
- * Union:
- * Right now, Union means UNION ALL, which does not de-duplicate rows. So, it is
- * safe to pushdown Filters and Projections through it. Once we add UNION DISTINCT,
- * we will not be able to pushdown Projections.
- *
- * Except:
- * It is not safe to pushdown Projections through it because we need to get the
- * intersect of rows by comparing the entire rows. It is fine to pushdown Filters
- * with deterministic condition.
- */
+  * Pushes certain operations to both sides of a Union or Except operator.
+  * Operations that are safe to pushdown are listed as follows.
+  * Union:
+  * Right now, Union means UNION ALL, which does not de-duplicate rows. So, it is
+  * safe to pushdown Filters and Projections through it. Once we add UNION DISTINCT,
+  * we will not be able to pushdown Projections.
+  *
+  * Except:
+  * It is not safe to pushdown Projections through it because we need to get the
+  * intersect of rows by comparing the entire rows. It is fine to pushdown Filters
+  * with deterministic condition.
+  */
 object SetOperationPushDown extends Rule[LogicalPlan] with PredicateHelper {
 
   /**
-   * Maps Attributes from the left side to the corresponding Attribute on the right side.
-   */
+    * Maps Attributes from the left side to the corresponding Attribute on the right side.
+    */
   private def buildRewrites(left: LogicalPlan, right: LogicalPlan): AttributeMap[Attribute] = {
     assert(left.output.size == right.output.size)
     AttributeMap(left.output.zip(right.output))
   }
 
   /**
-   * Rewrites an expression so that it can be pushed to the right side of a
-   * Union or Except operator. This method relies on the fact that the output attributes
-   * of a union/intersect/except are always equal to the left child's output.
-   */
+    * Rewrites an expression so that it can be pushed to the right side of a
+    * Union or Except operator. This method relies on the fact that the output attributes
+    * of a union/intersect/except are always equal to the left child's output.
+    */
   private def pushToRight[A <: Expression](e: A, rewrites: AttributeMap[Attribute]) = {
     val result = e transform {
       case a: Attribute => rewrites(a)
@@ -340,17 +341,17 @@ object SetOperationPushDown extends Rule[LogicalPlan] with PredicateHelper {
   }
 
   /**
-   * Splits the condition expression into small conditions by `And`, and partition them by
-   * deterministic, and finally recombine them by `And`. It returns an expression containing
-   * all deterministic expressions (the first field of the returned Tuple2) and an expression
-   * containing all non-deterministic expressions (the second field of the returned Tuple2).
-   */
+    * Splits the condition expression into small conditions by `And`, and partition them by
+    * deterministic, and finally recombine them by `And`. It returns an expression containing
+    * all deterministic expressions (the first field of the returned Tuple2) and an expression
+    * containing all non-deterministic expressions (the second field of the returned Tuple2).
+    */
   private def partitionByDeterministic(condition: Expression): (Expression, Expression) = {
     val andConditions = splitConjunctivePredicates(condition)
     andConditions.partition(_.deterministic) match {
       case (deterministic, nondeterministic) =>
         deterministic.reduceOption(And).getOrElse(Literal(true)) ->
-        nondeterministic.reduceOption(And).getOrElse(Literal(true))
+          nondeterministic.reduceOption(And).getOrElse(Literal(true))
     }
   }
 
@@ -397,15 +398,15 @@ object SetOperationPushDown extends Rule[LogicalPlan] with PredicateHelper {
 }
 
 /**
- * Attempts to eliminate the reading of unneeded columns from the query plan using the following
- * transformations:
- *
- *  - Inserting Projections beneath the following operators:
- *   - Aggregate
- *   - Generate
- *   - Project <- Join
- *   - LeftSemiJoin
- */
+  * Attempts to eliminate the reading of unneeded columns from the query plan using the following
+  * transformations:
+  *
+  *  - Inserting Projections beneath the following operators:
+  *   - Aggregate
+  *   - Generate
+  *   - Project <- Join
+  *   - LeftSemiJoin
+  */
 object ColumnPruning extends Rule[LogicalPlan] {
   private def sameOutput(output1: Seq[Attribute], output2: Seq[Attribute]): Boolean =
     output1.size == output2.size &&
@@ -502,9 +503,9 @@ object ColumnPruning extends Rule[LogicalPlan] {
 }
 
 /**
- * Combines two adjacent [[Project]] operators into one and perform alias substitution,
- * merging the expressions into one single expression.
- */
+  * Combines two adjacent [[Project]] operators into one and perform alias substitution,
+  * merging the expressions into one single expression.
+  */
 object CollapseProject extends Rule[LogicalPlan] {
 
   def apply(plan: LogicalPlan): LogicalPlan = plan transformUp {
@@ -574,8 +575,8 @@ object CollapseProject extends Rule[LogicalPlan] {
 }
 
 /**
- * Combines adjacent [[Repartition]] operators by keeping only the last one.
- */
+  * Combines adjacent [[Repartition]] operators by keeping only the last one.
+  */
 object CollapseRepartition extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transformUp {
     case r @ Repartition(numPartitions, shuffle, Repartition(_, _, child)) =>
@@ -584,10 +585,10 @@ object CollapseRepartition extends Rule[LogicalPlan] {
 }
 
 /**
- * Simplifies LIKE expressions that do not need full regular expressions to evaluate the condition.
- * For example, when the expression is just checking to see if a string starts with a given
- * pattern.
- */
+  * Simplifies LIKE expressions that do not need full regular expressions to evaluate the condition.
+  * For example, when the expression is just checking to see if a string starts with a given
+  * pattern.
+  */
 object LikeSimplification extends Rule[LogicalPlan] {
   // if guards below protect from escapes on trailing %.
   // Cases like "something\%" are not optimized, but this does not affect correctness.
@@ -614,10 +615,10 @@ object LikeSimplification extends Rule[LogicalPlan] {
 }
 
 /**
- * Replaces [[Expression Expressions]] that can be statically evaluated with
- * equivalent [[Literal]] values. This rule is more specific with
- * Null value propagation from bottom to top of the expression tree.
- */
+  * Replaces [[Expression Expressions]] that can be statically evaluated with
+  * equivalent [[Literal]] values. This rule is more specific with
+  * Null value propagation from bottom to top of the expression tree.
+  */
 object NullPropagation extends Rule[LogicalPlan] {
   def nonNullLiteral(e: Expression): Boolean = e match {
     case Literal(null, _) => false
@@ -690,14 +691,14 @@ object NullPropagation extends Rule[LogicalPlan] {
 }
 
 /**
- * Generate a list of additional filters from an operator's existing constraint but remove those
- * that are either already part of the operator's condition or are part of the operator's child
- * constraints. These filters are currently inserted to the existing conditions in the Filter
- * operators and on either side of Join operators.
- *
- * Note: While this optimization is applicable to all types of join, it primarily benefits Inner and
- * LeftSemi joins.
- */
+  * Generate a list of additional filters from an operator's existing constraint but remove those
+  * that are either already part of the operator's condition or are part of the operator's child
+  * constraints. These filters are currently inserted to the existing conditions in the Filter
+  * operators and on either side of Join operators.
+  *
+  * Note: While this optimization is applicable to all types of join, it primarily benefits Inner and
+  * LeftSemi joins.
+  */
 object InferFiltersFromConstraints extends Rule[LogicalPlan] with PredicateHelper {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case filter @ Filter(condition, child) =>
@@ -728,9 +729,9 @@ object InferFiltersFromConstraints extends Rule[LogicalPlan] with PredicateHelpe
 }
 
 /**
- * Replaces [[Expression Expressions]] that can be statically evaluated with
- * equivalent [[Literal]] values.
- */
+  * Replaces [[Expression Expressions]] that can be statically evaluated with
+  * equivalent [[Literal]] values.
+  */
 object ConstantFolding extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case q: LogicalPlan => q transformExpressionsDown {
@@ -746,9 +747,9 @@ object ConstantFolding extends Rule[LogicalPlan] {
 }
 
 /**
- * Replaces [[In (value, seq[Literal])]] with optimized version[[InSet (value, HashSet[Literal])]]
- * which is much faster
- */
+  * Replaces [[In (value, seq[Literal])]] with optimized version[[InSet (value, HashSet[Literal])]]
+  * which is much faster
+  */
 object OptimizeIn extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case q: LogicalPlan => q transformExpressionsDown {
@@ -760,12 +761,12 @@ object OptimizeIn extends Rule[LogicalPlan] {
 }
 
 /**
- * Simplifies boolean expressions:
- * 1. Simplifies expressions whose answer can be determined without evaluating both sides.
- * 2. Eliminates / extracts common factors.
- * 3. Merge same expressions
- * 4. Removes `Not` operator.
- */
+  * Simplifies boolean expressions:
+  * 1. Simplifies expressions whose answer can be determined without evaluating both sides.
+  * 2. Eliminates / extracts common factors.
+  * 3. Merge same expressions
+  * 4. Removes `Not` operator.
+  */
 object BooleanSimplification extends Rule[LogicalPlan] with PredicateHelper {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case q: LogicalPlan => q transformExpressionsUp {
@@ -862,8 +863,8 @@ object BooleanSimplification extends Rule[LogicalPlan] with PredicateHelper {
 }
 
 /**
- * Simplifies conditional expressions (if / case).
- */
+  * Simplifies conditional expressions (if / case).
+  */
 object SimplifyConditionals extends Rule[LogicalPlan] with PredicateHelper {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case q: LogicalPlan => q transformExpressionsUp {
@@ -892,8 +893,8 @@ object SimplifyConditionals extends Rule[LogicalPlan] with PredicateHelper {
 }
 
 /**
- * Combines all adjacent [[Union]] operators into a single [[Union]].
- */
+  * Combines all adjacent [[Union]] operators into a single [[Union]].
+  */
 object CombineUnions extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case Unions(children) => Union(children)
@@ -901,9 +902,9 @@ object CombineUnions extends Rule[LogicalPlan] {
 }
 
 /**
- * Combines two adjacent [[Filter]] operators into one, merging the non-redundant conditions into
- * one conjunctive predicate.
- */
+  * Combines two adjacent [[Filter]] operators into one, merging the non-redundant conditions into
+  * one conjunctive predicate.
+  */
 object CombineFilters extends Rule[LogicalPlan] with PredicateHelper {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case ff @ Filter(fc, nf @ Filter(nc, grandChild)) =>
@@ -918,11 +919,11 @@ object CombineFilters extends Rule[LogicalPlan] with PredicateHelper {
 }
 
 /**
- * Removes filters that can be evaluated trivially.  This can be done through the following ways:
- * 1) by eliding the filter for cases where it will always evaluate to `true`.
- * 2) by substituting a dummy empty relation when the filter will always evaluate to `false`.
- * 3) by eliminating the always-true conditions given the constraints on the child's output.
- */
+  * Removes filters that can be evaluated trivially.  This can be done through the following ways:
+  * 1) by eliding the filter for cases where it will always evaluate to `true`.
+  * 2) by substituting a dummy empty relation when the filter will always evaluate to `false`.
+  * 3) by eliminating the always-true conditions given the constraints on the child's output.
+  */
 object PruneFilters extends Rule[LogicalPlan] with PredicateHelper {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     // If the filter condition always evaluate to true, remove the filter.
@@ -950,11 +951,11 @@ object PruneFilters extends Rule[LogicalPlan] with PredicateHelper {
 }
 
 /**
- * Pushes [[Filter]] operators through [[Project]] operators, in-lining any [[Alias Aliases]]
- * that were defined in the projection.
- *
- * This heuristic is valid assuming the expression evaluation cost is minimal.
- */
+  * Pushes [[Filter]] operators through [[Project]] operators, in-lining any [[Alias Aliases]]
+  * that were defined in the projection.
+  *
+  * This heuristic is valid assuming the expression evaluation cost is minimal.
+  */
 object PushPredicateThroughProject extends Rule[LogicalPlan] with PredicateHelper {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     // SPARK-13473: We can't push the predicate down when the underlying projection output non-
@@ -999,9 +1000,9 @@ object PushPredicateThroughProject extends Rule[LogicalPlan] with PredicateHelpe
 }
 
 /**
- * Push [[Filter]] operators through [[Generate]] operators. Parts of the predicate that reference
- * attributes generated in [[Generate]] will remain above, and the rest should be pushed beneath.
- */
+  * Push [[Filter]] operators through [[Generate]] operators. Parts of the predicate that reference
+  * attributes generated in [[Generate]] will remain above, and the rest should be pushed beneath.
+  */
 object PushPredicateThroughGenerate extends Rule[LogicalPlan] with PredicateHelper {
 
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
@@ -1023,9 +1024,9 @@ object PushPredicateThroughGenerate extends Rule[LogicalPlan] with PredicateHelp
 }
 
 /**
- * Push [[Filter]] operators through [[Aggregate]] operators, iff the filters reference only
- * non-aggregate attributes (typically literals or grouping expressions).
- */
+  * Push [[Filter]] operators through [[Aggregate]] operators, iff the filters reference only
+  * non-aggregate attributes (typically literals or grouping expressions).
+  */
 object PushPredicateThroughAggregate extends Rule[LogicalPlan] with PredicateHelper {
 
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
@@ -1100,28 +1101,28 @@ object ReorderJoin extends Rule[LogicalPlan] with PredicateHelper {
 
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case j @ ExtractFiltersAndInnerJoins(input, conditions)
-        if input.size > 2 && conditions.nonEmpty =>
+      if input.size > 2 && conditions.nonEmpty =>
       createOrderedJoin(input, conditions)
   }
 }
 
 /**
- * Elimination of outer joins, if the predicates can restrict the result sets so that
- * all null-supplying rows are eliminated
- *
- * - full outer -> inner if both sides have such predicates
- * - left outer -> inner if the right side has such predicates
- * - right outer -> inner if the left side has such predicates
- * - full outer -> left outer if only the left side has such predicates
- * - full outer -> right outer if only the right side has such predicates
- *
- * This rule should be executed before pushing down the Filter
- */
+  * Elimination of outer joins, if the predicates can restrict the result sets so that
+  * all null-supplying rows are eliminated
+  *
+  * - full outer -> inner if both sides have such predicates
+  * - left outer -> inner if the right side has such predicates
+  * - right outer -> inner if the left side has such predicates
+  * - full outer -> left outer if only the left side has such predicates
+  * - full outer -> right outer if only the right side has such predicates
+  *
+  * This rule should be executed before pushing down the Filter
+  */
 object OuterJoinElimination extends Rule[LogicalPlan] with PredicateHelper {
 
   /**
-   * Returns whether the expression returns null or false when all inputs are nulls.
-   */
+    * Returns whether the expression returns null or false when all inputs are nulls.
+    */
   private def canFilterOutNull(e: Expression): Boolean = {
     if (!e.deterministic) return false
     val attributes = e.references.toSeq
@@ -1162,27 +1163,27 @@ object OuterJoinElimination extends Rule[LogicalPlan] with PredicateHelper {
 }
 
 /**
- * Pushes down [[Filter]] operators where the `condition` can be
- * evaluated using only the attributes of the left or right side of a join.  Other
- * [[Filter]] conditions are moved into the `condition` of the [[Join]].
- *
- * And also pushes down the join filter, where the `condition` can be evaluated using only the
- * attributes of the left or right side of sub query when applicable.
- *
- * Check https://cwiki.apache.org/confluence/display/Hive/OuterJoinBehavior for more details
- */
+  * Pushes down [[Filter]] operators where the `condition` can be
+  * evaluated using only the attributes of the left or right side of a join.  Other
+  * [[Filter]] conditions are moved into the `condition` of the [[Join]].
+  *
+  * And also pushes down the join filter, where the `condition` can be evaluated using only the
+  * attributes of the left or right side of sub query when applicable.
+  *
+  * Check https://cwiki.apache.org/confluence/display/Hive/OuterJoinBehavior for more details
+  */
 object PushPredicateThroughJoin extends Rule[LogicalPlan] with PredicateHelper {
   /**
-   * Splits join condition expressions into three categories based on the attributes required
-   * to evaluate them.
-   *
-   * @return (canEvaluateInLeft, canEvaluateInRight, haveToEvaluateInBoth)
-   */
+    * Splits join condition expressions into three categories based on the attributes required
+    * to evaluate them.
+    *
+    * @return (canEvaluateInLeft, canEvaluateInRight, haveToEvaluateInBoth)
+    */
   private def split(condition: Seq[Expression], left: LogicalPlan, right: LogicalPlan) = {
     val (leftEvaluateCondition, rest) =
-        condition.partition(_.references subsetOf left.outputSet)
+      condition.partition(_.references subsetOf left.outputSet)
     val (rightEvaluateCondition, commonCondition) =
-        rest.partition(_.references subsetOf right.outputSet)
+      rest.partition(_.references subsetOf right.outputSet)
 
     (leftEvaluateCondition, rightEvaluateCondition, commonCondition)
   }
@@ -1267,8 +1268,8 @@ object PushPredicateThroughJoin extends Rule[LogicalPlan] with PredicateHelper {
 }
 
 /**
- * Removes [[Cast Casts]] that are unnecessary because the input is already the correct type.
- */
+  * Removes [[Cast Casts]] that are unnecessary because the input is already the correct type.
+  */
 object SimplifyCasts extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transformAllExpressions {
     case Cast(e, dataType) if e.dataType == dataType => e
@@ -1276,8 +1277,8 @@ object SimplifyCasts extends Rule[LogicalPlan] {
 }
 
 /**
- * Removes nodes that are not necessary.
- */
+  * Removes nodes that are not necessary.
+  */
 object RemoveDispensableExpressions extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transformAllExpressions {
     case UnaryPositive(child) => child
@@ -1286,9 +1287,9 @@ object RemoveDispensableExpressions extends Rule[LogicalPlan] {
 }
 
 /**
- * Combines two adjacent [[Limit]] operators into one, merging the
- * expressions into one single expression.
- */
+  * Combines two adjacent [[Limit]] operators into one, merging the
+  * expressions into one single expression.
+  */
 object CombineLimits extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case ll @ GlobalLimit(le, nl @ GlobalLimit(ne, grandChild)) =>
@@ -1301,9 +1302,9 @@ object CombineLimits extends Rule[LogicalPlan] {
 }
 
 /**
- * Removes the inner case conversion expressions that are unnecessary because
- * the inner conversion is overwritten by the outer one.
- */
+  * Removes the inner case conversion expressions that are unnecessary because
+  * the inner conversion is overwritten by the outer one.
+  */
 object SimplifyCaseConversionExpressions extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case q: LogicalPlan => q transformExpressionsUp {
@@ -1316,11 +1317,11 @@ object SimplifyCaseConversionExpressions extends Rule[LogicalPlan] {
 }
 
 /**
- * Speeds up aggregates on fixed-precision decimals by executing them on unscaled Long values.
- *
- * This uses the same rules for increasing the precision and scale of the output as
- * [[org.apache.spark.sql.catalyst.analysis.DecimalPrecision]].
- */
+  * Speeds up aggregates on fixed-precision decimals by executing them on unscaled Long values.
+  *
+  * This uses the same rules for increasing the precision and scale of the output as
+  * [[org.apache.spark.sql.catalyst.analysis.DecimalPrecision]].
+  */
 object DecimalAggregates extends Rule[LogicalPlan] {
   import Decimal.MAX_LONG_DIGITS
 
@@ -1342,11 +1343,11 @@ object DecimalAggregates extends Rule[LogicalPlan] {
 }
 
 /**
- * Converts local operations (i.e. ones that don't require data exchange) on LocalRelation to
- * another LocalRelation.
- *
- * This is relatively simple as it currently handles only a single case: Project.
- */
+  * Converts local operations (i.e. ones that don't require data exchange) on LocalRelation to
+  * another LocalRelation.
+  *
+  * This is relatively simple as it currently handles only a single case: Project.
+  */
 object ConvertToLocalRelation extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case Project(projectList, LocalRelation(output, data)) =>
@@ -1356,11 +1357,11 @@ object ConvertToLocalRelation extends Rule[LogicalPlan] {
 }
 
 /**
- * Replaces logical [[Distinct]] operator with an [[Aggregate]] operator.
- * {{{
- *   SELECT DISTINCT f1, f2 FROM t  ==>  SELECT f1, f2 FROM t GROUP BY f1, f2
- * }}}
- */
+  * Replaces logical [[Distinct]] operator with an [[Aggregate]] operator.
+  * {{{
+  *   SELECT DISTINCT f1, f2 FROM t  ==>  SELECT f1, f2 FROM t GROUP BY f1, f2
+  * }}}
+  */
 object ReplaceDistinctWithAggregate extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case Distinct(child) => Aggregate(child.output, child.output, child)
@@ -1368,17 +1369,17 @@ object ReplaceDistinctWithAggregate extends Rule[LogicalPlan] {
 }
 
 /**
- * Replaces logical [[Intersect]] operator with a left-semi [[Join]] operator.
- * {{{
- *   SELECT a1, a2 FROM Tab1 INTERSECT SELECT b1, b2 FROM Tab2
- *   ==>  SELECT DISTINCT a1, a2 FROM Tab1 LEFT SEMI JOIN Tab2 ON a1<=>b1 AND a2<=>b2
- * }}}
- *
- * Note:
- * 1. This rule is only applicable to INTERSECT DISTINCT. Do not use it for INTERSECT ALL.
- * 2. This rule has to be done after de-duplicating the attributes; otherwise, the generated
- *    join conditions will be incorrect.
- */
+  * Replaces logical [[Intersect]] operator with a left-semi [[Join]] operator.
+  * {{{
+  *   SELECT a1, a2 FROM Tab1 INTERSECT SELECT b1, b2 FROM Tab2
+  *   ==>  SELECT DISTINCT a1, a2 FROM Tab1 LEFT SEMI JOIN Tab2 ON a1<=>b1 AND a2<=>b2
+  * }}}
+  *
+  * Note:
+  * 1. This rule is only applicable to INTERSECT DISTINCT. Do not use it for INTERSECT ALL.
+  * 2. This rule has to be done after de-duplicating the attributes; otherwise, the generated
+  *    join conditions will be incorrect.
+  */
 object ReplaceIntersectWithSemiJoin extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case Intersect(left, right) =>
@@ -1389,9 +1390,9 @@ object ReplaceIntersectWithSemiJoin extends Rule[LogicalPlan] {
 }
 
 /**
- * Removes literals from group expressions in [[Aggregate]], as they have no effect to the result
- * but only makes the grouping key bigger.
- */
+  * Removes literals from group expressions in [[Aggregate]], as they have no effect to the result
+  * but only makes the grouping key bigger.
+  */
 object RemoveLiteralFromGroupExpressions extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = plan transform {
     case a @ Aggregate(grouping, _, _) =>
@@ -1401,8 +1402,8 @@ object RemoveLiteralFromGroupExpressions extends Rule[LogicalPlan] {
 }
 
 /**
- * Computes the current date and time to make sure we return the same result in a single query.
- */
+  * Computes the current date and time to make sure we return the same result in a single query.
+  */
 object ComputeCurrentTime extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = {
     val dateExpr = CurrentDate()
@@ -1416,3 +1417,5 @@ object ComputeCurrentTime extends Rule[LogicalPlan] {
     }
   }
 }
+
+
