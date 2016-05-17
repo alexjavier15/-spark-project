@@ -4,12 +4,14 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, EqualTo, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 
+import scala.collection.mutable
+
 /**
   * Created by alex on 21.03.16.
   */
 class EquivalencesClass extends Logging{
 
-  @transient val conditions: scala.collection.mutable.Set[Expression] =
+  @transient val conditions=  mutable.HashMap[Int, Expression]()
     scala.collection.mutable.Set()
 
 
@@ -51,7 +53,7 @@ class EquivalencesClass extends Logging{
 
           members += EquivalenceMember( l)
           members += EquivalenceMember( r)
-          conditions += condition
+          conditions += (condition.semanticHash() -> condition)
 
       case _ =>
 
@@ -77,8 +79,10 @@ class EquivalencesClass extends Logging{
     val rightMembers = members.filter(canEvaluate(_,right))
 
     val builtConditions = buildCondtions(leftMembers.toSeq, rightMembers.toSeq)
-
-    conditions++=builtConditions
+    //builtConditions.filter(x => conditions.contains(x.semanticHash()))
+    builtConditions.foreach(condition=>
+      conditions += (condition.semanticHash() -> condition)
+    )
     builtConditions
 
   }

@@ -351,8 +351,7 @@ abstract class BinaryNode extends LogicalPlan {
   }
   override def semanticHash : Int ={
 
-    var h = 17
-    h = h * 37 + left.simpleHash + right.simpleHash
+    var h = left.semanticHash + right.semanticHash
     h
 
   }

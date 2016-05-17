@@ -69,7 +69,7 @@ case class ShuffledHashJoin(
   }
 
 
-  override def semanticHash: Int = {
+  /*override def semanticHash: Int = {
     var h = 17
     h = h * 37 + left.semanticHash + right.semanticHash
     h = h * 37 +  Some((leftKeys zip rightKeys).map { case (l, r) => EqualTo(l, r) }.
@@ -77,7 +77,7 @@ case class ShuffledHashJoin(
 
     h
 
-  }
+  }*/
 
   protected override def doExecute(): RDD[InternalRow] = {
     val numOutputRows = longMetric("numOutputRows")

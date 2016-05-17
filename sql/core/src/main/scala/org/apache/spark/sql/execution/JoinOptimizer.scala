@@ -44,9 +44,11 @@ object JoinOptimizer{
 }
 
 class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLContext) extends PredicateHelper with Logging{
+  private var originalOrder : Option[LogicalPlan] = None
   lazy private val (baseRelations, originalConditions): (Seq[LogicalPlan], Seq[Expression]) =
-    extractJoins(originPlan).
+    extractJoins(originPlan,splitConjunctivePredicates).
       getOrElse((Seq(), Seq()))
+
   lazy private val _otherConditions= mutable.Set[Expression]()
   lazy private val eqClasses: scala.collection.mutable.Set[EquivalencesClass] = mutable.Set()
   lazy private val accumulator: mutable.Seq[LogicalPlan] = mutable.Seq()
@@ -54,6 +56,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   val mJoinLogical: Option[LogicalPlan] = analyzeWithMJoin(doPermutations(baseRelations))
 
   private val all_joins: mutable.Map[Int, mutable.ListBuffer[LogicalPlan]] = mutable.Map()
+
 
 
   private def findChunkedBaseRelPlans(): Seq[(LogicalPlan, Seq[LogicalPlan])] = {
@@ -103,42 +106,39 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
     * conditions
     *
     */
-  private def extractJoins(plan: LogicalPlan): Option[(Seq[LogicalPlan], Seq[Expression])] = {
+  private def extractJoins(plan: LogicalPlan , f : Expression => Seq[Expression]): Option[(Seq[LogicalPlan], Seq[Expression])] = {
     if(!sqlContext.conf.mJoinEnabled )
       Seq.empty
 
     // flatten all inner joins, which are next to each other
-    def flattenJoin(plan: LogicalPlan): (Seq[LogicalPlan], Seq[Expression]) = plan match {
+    def flattenJoin(plan: LogicalPlan,f : Expression => Seq[Expression]): (Seq[LogicalPlan], Seq[Expression]) = plan match {
       case logical.Join(left, right, Inner, cond) =>
-        val (plans, conditions) = flattenJoin(left)
+        val (plans, conditions) = flattenJoin(left,f)
         (plans ++ Seq(right), conditions ++ cond.toSeq)
 
       case logical.Filter(filterCondition, j@Join(left, right, Inner, joinCondition)) =>
-        val (plans, conditions) = flattenJoin(j)
-        (plans, conditions ++ splitConjunctivePredicates(filterCondition))
-      case logical.Project(fields, child) => flattenJoin(child)
-      case logical.Aggregate(_, _, child) => flattenJoin(child)
-      case logical.GlobalLimit(_, child) => flattenJoin(child)
-      case logical.LocalLimit(_, child) => flattenJoin(child)
-      case logical.Sort(_,_,child)=>flattenJoin(child)
+        val (plans, conditions) = flattenJoin(j,f)
+        (plans, conditions ++ f(filterCondition))
+      case logical.Project(fields, child) => flattenJoin(child,f)
+      case logical.Aggregate(_, _, child) => flattenJoin(child,f)
+      case logical.GlobalLimit(_, child) => flattenJoin(child,f)
+      case logical.LocalLimit(_, child) => flattenJoin(child,f)
+      case logical.Sort(_,_,child)=>flattenJoin(child,f)
       case _ => (Seq(plan), Seq())
     }
 
-    logInfo("Original Plan")
-    logInfo(plan.toString)
-
     plan match {
-      case f@logical.Filter(filterCondition, j@Join(_, _, Inner, _)) =>
-        Some(flattenJoin(f))
+      case fil @logical.Filter(filterCondition, j@Join(_, _, Inner, _)) =>
+        Some(flattenJoin(fil,f))
       case j@logical.Join(_, _, Inner, _) =>
-        Some(flattenJoin(j))
+        Some(flattenJoin(j,f))
       case p@logical.Project(fields, child) =>
         accumulator :+ p
-        Some(flattenJoin(child))
+        Some(flattenJoin(child,f))
       case o@logical.Aggregate(_, _, child) =>
-        Some(flattenJoin(o))
-      case l1@logical.GlobalLimit(_, child) => Some(flattenJoin(l1))
-      case l2@logical.LocalLimit(_, child) => Some(flattenJoin(l2))
+        Some(flattenJoin(o,f))
+      case l1@logical.GlobalLimit(_, child) => Some(flattenJoin(l1,f))
+      case l2@logical.LocalLimit(_, child) => Some(flattenJoin(l2,f))
       case _ => None
     }
 
@@ -231,6 +231,21 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   }
 
+
+
+  private def haveEquivalentOrder(plan1 :Seq[LogicalPlan],plan2 :Seq[LogicalPlan] ): Boolean ={
+    assert(plan1.size== plan2.size  )
+    if(plan1.size == 2)
+      true
+    else{
+      val testSize = plan1.size -2
+      (plan1.take(testSize) zip plan2.take(testSize)).forall{
+
+        case (a,b) => a.semanticHash == b.semanticHash
+      }
+
+    }
+  }
   private def analyzeWithMJoin(inferedPlans: List[(LogicalPlan,
     List[Expression])]): Option[LogicalPlan] = {
 
@@ -247,14 +262,40 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       /*
       * TO-DO
       * */
+      originalOrder=None
       println("infered plans : "+ inferedPlans.size)
+
+
+      /*val grouped = inferedPlans.groupBy(subplan => {
+
+        extractJoins(subplan._1, x => Seq(x)) match {
+          case  Some( (r : Seq[LogicalPlan] ,c : Seq[Expression]) ) =>
+            if(haveEquivalentOrder(baseRelations,r))
+              originalOrder=Some(subplan._1)
+            c.map(x => x.semanticHash()).sum
+          case _ => -1
+        }
+
+
+      })
+
+      val  counted = grouped.map( x => x._1 -> x._2.size)
+
+     val max = counted.maxBy{
+        case (hash,count) => count
+      }
+      logInfo(counted.toString())
+
+      logInfo("filtered plans size: "+ max._2)*/
+
+
 
       val analyzedJoins = inferedPlans.map(subplan => optimizeSubplan(subplan._1, subplan._2))
       // We can gather one for all the leaves relations (we assume unique projections and
       // filter. Plan the original plan and get the result
      // val analyzedOriginal = optimizePlans(Seq(originPlan)).head
       //val (leaves, filters) = extractJoins(analyzedOriginal).getOrElse((Seq(), Seq()))
-      logInfo(chunkedRels.toString())
+      //logInfo(chunkedRels.toString())
 
       //Extract the first Join. To-Do : Mjoin must not have a join as child we do that to
       // test execution of at least one plan
@@ -262,8 +303,26 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       val analyzedChunkedRelations: Seq[(LogicalPlan, Seq[LogicalPlan])] = chunkedRels.map(relations =>
         ( optimizePlans(Seq(relations._1)).head ,optimizePlans(relations._2)))
       //Experimental:
+      val toExecute =originPlan
+      /*originalOrder match{
 
-      val optimzedOriginal =sqlContext.sessionState.optimizer.execute(originPlan)
+        case Some(p) => p
+        case None =>
+          logInfo("Not found original Order. Getting random")
+          val r = scala.util.Random
+          val planId =  r.nextInt(analyzedJoins.size)
+          analyzedJoins(planId)
+      }*/
+
+
+
+      val optimzedOriginal =sqlContext.sessionState.optimizer.execute(toExecute)
+
+
+
+
+
+
       val rootJoin = JoinOptimizer.findRootJoin(optimzedOriginal)
     //  val union = sqlContext.sessionState.analyzer.execute(logical.Union(chunkedOriginalJoin))
     //  val analyzedUnion = sqlContext.sessionState.optimizer.execute(union)
@@ -326,6 +385,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   private def optimizeSubplan(joined: LogicalPlan, conditions: Seq[Expression]): LogicalPlan = {
 
     val otherFilters = _otherConditions.reduceLeftOption(And)
+
 
     otherFilters match {
 

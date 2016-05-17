@@ -536,8 +536,7 @@ private[sql] trait BinaryNode extends SparkPlan {
 
   }
   override def semanticHash: Int = {
-    var h = 17
-    h = h * 37 + left.semanticHash + right.semanticHash
+    var h = left.semanticHash + right.semanticHash
     h
 
   }

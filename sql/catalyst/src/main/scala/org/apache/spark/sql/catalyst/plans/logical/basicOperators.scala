@@ -262,14 +262,14 @@ case class Join(
   }
 
 
-  override def semanticHash: Int = {
+/*  override def semanticHash: Int = {
     var h = 17
     h = h * 37 + left.semanticHash + right.semanticHash
     h = h * 37 + condition.map(_.semanticHash()).sum
 
     h
 
-  }
+  }*/
 
   override def output: Seq[Attribute] = {
     joinType match {
