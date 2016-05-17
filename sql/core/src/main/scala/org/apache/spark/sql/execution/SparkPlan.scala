@@ -58,7 +58,13 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
   protected def sparkContext = sqlContext.sparkContext
   var statistics : Option[Map[String,Long]] = None
   var hasSelectivity : Boolean = false
-  def selectivity() : Double = getOutputRows.asInstanceOf[Double]/children.map(_.getOutputRows).product
+  def selectivity() : Double = {
+    if(getOutputRows < 0)
+      Double.MinValue
+    else
+      getOutputRows.asInstanceOf[Double]/children.map(_.getOutputRows).product
+
+  }
 
   def getNumPartitions: Long = {
     if (metrics.contains(NUM_PARTITIONS_KEY)) {
@@ -75,7 +81,7 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
     if (metrics.contains(OUTPUT_ROWS_KEY)) {
       val rows = metrics(OUTPUT_ROWS_KEY).asInstanceOf[LongSQLMetric].value.value
       rows match {
-        case r: Long if r <= 0L => 1
+        case r: Long if r <= 0L => Long.MinValue
         case _ => rows
       }
     }

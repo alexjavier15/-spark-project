@@ -149,7 +149,7 @@ case class BroadcastMJoin(
     SelectivityPlan.updatefromExecution(sparkPlan)
 
     logInfo("****Selectivity Plans****")
-    logInfo(SelectivityPlan._selectivityPlanRoots.filter( a => a._2.isValid)toString())
+    logInfo(SelectivityPlan._selectivityPlanRoots.toString())
     val bestPlan =SelectivityPlan._selectivityPlanRoots.
       minBy{
         case (hc,selPlan) if selPlan.isValid => selPlan.planCost()
@@ -158,17 +158,17 @@ case class BroadcastMJoin(
     logInfo("****Min  plan****")
     logInfo(bestPlan.toString())
     val oldPlan = _bestPlan
-    val _bestLogical =_subplansMap.get(bestPlan._1).get
-    val queryExecution =new QueryExecution(sqlContext,_bestLogical)
+      val _bestLogical = _subplansMap.get(bestPlan._1).get
+      val queryExecution = new QueryExecution(sqlContext, _bestLogical)
 
 
 
-    _bestPlan= queryExecution.sqlContext.sessionState.planner.
-      plan(queryExecution.sqlContext.sessionState.optimizer.execute(_bestLogical)).next
-    logInfo("****New Optimized plan****")
-    logInfo(_bestPlan.toString())
-    logInfo("****SelectivityPlan filters****")
-    logInfo(SelectivityPlan._filterStats.toString())
+      _bestPlan = queryExecution.sqlContext.sessionState.planner.
+        plan(queryExecution.sqlContext.sessionState.optimizer.execute(_bestLogical)).next
+      logInfo("****New Optimized plan****")
+      logInfo(_bestPlan.toString())
+      logInfo("****SelectivityPlan filters****")
+      logInfo(SelectivityPlan._filterStats.toString())
 
 
   }
@@ -220,7 +220,7 @@ case class BroadcastMJoin(
         val newPlan = _bestPlan transformUp {
 
           case filter @ Filter(_ ,  scan@DataSourceScan(_,_,h :  HadoopPfRelation,_)  )=>
-               Sample(0.00,0.05,false,System.currentTimeMillis(),filter)
+               Sample(0.00,0.20,false,System.currentTimeMillis(),filter)
 
           case scan@DataSourceScan(_,_,h :  HadoopPfRelation,_) =>
             val ds = subplan.get(h.semanticHash).get
@@ -294,7 +294,7 @@ case class BroadcastMJoin(
 case class FilterStatInfo( filter : Expression
                            ) extends Serializable {
 
-  private[this] var _selectivity : Double  = 2.0
+  private[this] var _selectivity : Double  = Double.MinValue
   private[this] val  _derived : mutable.Set[FilterStatInfo] = mutable.Set[FilterStatInfo]()
 
   def selectivity : Double = _selectivity
@@ -420,20 +420,23 @@ object SelectivityPlan {
     }
 
   }
+  def isValidSelectivity(sel : Double ) : Boolean = sel >= 0 && sel <= 1
+  def isValidRows(rows : Long ) : Boolean = rows >= 0
+
   def updatefromExecution(sparkPlan : SparkPlan) : Unit ={
 
     sparkPlan match {
       case join @ ShuffledHashJoin(leftKeys,rightKeys,_,_,condition,left,right) =>
         updatefromExecution(right)
         updatefromExecution(left)
-
+        if(isValidSelectivity(sparkPlan.selectivity() )&& isValidRows(sparkPlan.getOutputRows)){
         updateFilterStats(Seq(leftKeys), rightKeys,sparkPlan.selectivity())
         //TODO unsafe  operation
         _selectivityPlanNodesSemantic.getOrElse(join.semanticHash,Nil).foreach {
           selPlan =>
             selPlan.setRowsFromExecution(join.getOutputRows)
             selPlan.setNumPartitionsFromExecution(sparkPlan.getNumPartitions)
-        }
+        }}
       case f@Filter(condition,child0@DataSourceScan(_, _, _, _)) =>
         _selectivityPlanNodes.get(f.semanticHash).get.setRowsFromExecution(f.getOutputRows)
 
@@ -516,16 +519,17 @@ abstract class SelectivityPlan()
 
   private[sql] var rowsFromExecution : Option[Long] = None
   private[sql] var numPartitionsFromExecution : Option[Long] = None
-  private var _rows : Long = -Long.MinValue
+  private var _rows : Long = Long.MinValue
   // for future use in average
   private[sql] var numSelUpdates : Int = 0
   private[sql] var numrowsUpdates : Int = 0
   val shortName : String
 
   def isValid : Boolean = false;
-  def selectivity : Double = 2
+  def selectivity : Double = Double.MinValue
   def rows : Long =  rowsFromExecution.getOrElse(_rows)
 
+  def refresh():Unit
 
   def setRowsFromExecution(rows : Long): Unit ={
     rowsFromExecution= Some(rows)
@@ -575,6 +579,11 @@ case class ScanCondition( outputSet : Seq[Attribute],
     super.setRows(rows)
   }
 
+  override def refresh(): Unit = {
+
+
+  }
+
   /**
     * Returns a Seq of the children of this node.
     * Children should not change. Immutability required for containsChild optimization
@@ -612,13 +621,15 @@ case class HashCondition(left : SelectivityPlan,
     left.isValid && right.isValid
 
 
+  override def refresh(): Unit = {
 
 
+  }
 
   override def selectivity: Double = {
-    if(rowsFromExecution.isDefined){
+    if(rowsFromExecution.isDefined && children.map(_.isValid).reduceLeft(_&&_)){
       val sel = rowsFromExecution.get.asInstanceOf[Double]/ children.map(_.rows).product
-      if(condition.selectivity >=1 )
+      if(condition.selectivity < 0 )
         condition.setSelectivity(sel)
       sel
     }
