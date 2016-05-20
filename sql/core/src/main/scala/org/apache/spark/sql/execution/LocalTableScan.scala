@@ -28,14 +28,14 @@ import org.apache.spark.sql.execution.metric.SQLMetrics
  */
 private[sql] case class LocalTableScan(
     output: Seq[Attribute],
-    rows: Seq[InternalRow]) extends LeafNode {
+    rows0: Seq[InternalRow]) extends LeafNode {
 
   private[sql] override lazy val metrics = Map(
     "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"))
 
   private val unsafeRows: Array[InternalRow] = {
     val proj = UnsafeProjection.create(output, output)
-    rows.map(r => proj(r).copy()).toArray
+    rows0.map(r => proj(r).copy()).toArray
   }
 
   private lazy val rdd = sqlContext.sparkContext.parallelize(unsafeRows)

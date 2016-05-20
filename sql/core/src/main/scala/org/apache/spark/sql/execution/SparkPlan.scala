@@ -47,6 +47,7 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
 
   val OUTPUT_ROWS_KEY : String = "numOutputRows"
   val NUM_PARTITIONS_KEY : String = "numPartitions"
+  val NUM_ROWS_KEY : String = "numRows"
   /**
    * A handle to the SQL Context that was used to create this plan.   Since many operators need
    * access to the sqlContext for RDD operations or configuration this field is automatically
@@ -59,12 +60,18 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
   var statistics : Option[Map[String,Long]] = None
   var hasSelectivity : Boolean = false
   def selectivity() : Double = {
-    if(getOutputRows < 0)
-      Double.MinValue
+
+    if(getOutputRows <= 0)
+     Double.MinPositiveValue
     else
-      getOutputRows.asInstanceOf[Double]/children.map(_.getOutputRows).product
+      getOutputRows.asInstanceOf[Double]/children.map(_.rows).product
 
   }
+  protected def  capRows(rows : Long): Long = rows match {
+    case r if r <= 0 => 1L
+    case r => r
+  }
+
 
   def getNumPartitions: Long = {
     if (metrics.contains(NUM_PARTITIONS_KEY)) {
@@ -80,16 +87,23 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
   def getOutputRows: Long = {
     if (metrics.contains(OUTPUT_ROWS_KEY)) {
       val rows = metrics(OUTPUT_ROWS_KEY).asInstanceOf[LongSQLMetric].value.value
-      rows match {
-        case r: Long if r <= 0L => Long.MinValue
-        case _ => rows
-      }
-    }
-    else
-      1
+      capRows(rows)
+    }else
+      throw new UnsupportedOperationException(s"$nodeName does not contains output rows metric")
+
   }
 
-  def planCost() : Long = {
+  def rows() : Long ={
+    if (metrics.contains(NUM_ROWS_KEY)) {
+    val rows = metrics(NUM_ROWS_KEY).asInstanceOf[LongSQLMetric].value.value
+    capRows(rows)
+  }else
+  throw new UnsupportedOperationException(s"$nodeName does not contains num rows metric")
+
+}
+
+
+def planCost() : Long = {
     throw new UnsupportedOperationException(s"$nodeName does not implement plan costing")
   }
 
@@ -518,6 +532,9 @@ private[sql] trait UnaryNode extends SparkPlan {
     case _ =>child.simpleHash
 
   }
+
+
+  override def rows(): Long = child.rows()
 
   override def semanticHash: Int =  child.semanticHash
 

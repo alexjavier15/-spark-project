@@ -5,18 +5,18 @@ import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeS
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 
 import scala.collection.mutable
+import scala.collection.mutable.{HashMap, HashSet}
 
 /**
   * Created by alex on 21.03.16.
   */
 class EquivalencesClass extends Logging{
 
-  @transient val conditions=  mutable.HashMap[Int, Expression]()
+  @transient val conditions=  HashMap[Int, Expression]()
     scala.collection.mutable.Set()
 
 
-  @transient val members: scala.collection.mutable.Set[EquivalenceMember] =
-    scala.collection.mutable.Set()
+  @transient val members =  HashSet[EquivalenceMember] ()
 
 
   @transient var merged: Boolean = false
@@ -72,35 +72,24 @@ class EquivalencesClass extends Logging{
   }
 
   def generateJoinImpliedEqualities(left: Set[LogicalPlan],
-                                    right: Set[LogicalPlan]): Seq[Expression] = {
+                                    right: Set[LogicalPlan]): Option[Expression] = {
 
 
-    val leftMembers = members.filter(canEvaluate(_,left))
-    val rightMembers = members.filter(canEvaluate(_,right))
+    val leftMembers = members.find(canEvaluate(_,left))
+    val rightMembers = members.find(canEvaluate(_,right))
+    val condition  = (leftMembers,rightMembers) match{
 
-    val builtConditions = buildCondtions(leftMembers.toSeq, rightMembers.toSeq)
-    //builtConditions.filter(x => conditions.contains(x.semanticHash()))
-    builtConditions.foreach(condition=>
-      conditions += (condition.semanticHash() -> condition)
-    )
-    builtConditions
-
-  }
-
-
-
-
-
-
-  private[this] def buildCondtions(leftMembers : Seq[EquivalenceMember],
-    rightMembers :Seq[EquivalenceMember]): Seq[Expression] = {
-
-      for (l <- leftMembers;   r <- rightMembers)
-             yield
-               EqualTo (l.outputSet, r.outputSet).withNewChildren(Seq(l.outputSet, r.outputSet))
+      case (Some(l), Some(r)) =>
+        val res  =EqualTo(l.outputSet,r.outputSet).withNewChildren(Seq(l,r).map(_.outputSet))
+        conditions += (res.semanticHash() -> res)
+        Some(res)
+      case _ => None
 
     }
 
+    condition
+
+  }
 
 
   def canMergeWith(that: EquivalencesClass): Boolean =  this.members.isEmpty  ||

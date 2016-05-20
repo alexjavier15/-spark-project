@@ -220,7 +220,7 @@ case class BroadcastMJoin(
         val newPlan = _bestPlan transformUp {
 
           case filter @ Filter(_ ,  scan@DataSourceScan(_,_,h :  HadoopPfRelation,_)  )=>
-               Sample(0.00,0.20,false,System.currentTimeMillis(),filter)
+               Sample(0.00,0.05,false,System.currentTimeMillis(),filter)
 
           case scan@DataSourceScan(_,_,h :  HadoopPfRelation,_) =>
             val ds = subplan.get(h.semanticHash).get
@@ -240,7 +240,7 @@ case class BroadcastMJoin(
 
         if (sqlContext.conf.mJoinSamplingEnabled ) {
 
-          rdd.countApprox(120000,0.95)
+          rdd.count
 
           executedPlan.printMetrics
           tested = true
@@ -429,21 +429,20 @@ object SelectivityPlan {
       case join @ ShuffledHashJoin(leftKeys,rightKeys,_,_,condition,left,right) =>
         updatefromExecution(right)
         updatefromExecution(left)
-        if(isValidSelectivity(sparkPlan.selectivity() )&& isValidRows(sparkPlan.getOutputRows)){
         updateFilterStats(Seq(leftKeys), rightKeys,sparkPlan.selectivity())
         //TODO unsafe  operation
         _selectivityPlanNodesSemantic.getOrElse(join.semanticHash,Nil).foreach {
           selPlan =>
             selPlan.setRowsFromExecution(join.getOutputRows)
             selPlan.setNumPartitionsFromExecution(sparkPlan.getNumPartitions)
-        }}
+        }
       case f@Filter(condition,child0@DataSourceScan(_, _, _, _)) =>
-        _selectivityPlanNodes.get(f.semanticHash).get.setRowsFromExecution(f.getOutputRows)
+        _selectivityPlanNodes.get(f.semanticHash).get.setRowsFromExecution(f.rows())
 
       case u: UnaryNode => updatefromExecution(u.child)
 
 
-      case u: LeafNode => _selectivityPlanNodes.get(u.semanticHash).get.setRowsFromExecution(u.getOutputRows)
+      case u: LeafNode => _selectivityPlanNodes.get(u.semanticHash).get.setRowsFromExecution(u.rows())
 
     }
 

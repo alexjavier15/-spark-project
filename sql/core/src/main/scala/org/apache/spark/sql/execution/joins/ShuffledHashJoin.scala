@@ -23,7 +23,7 @@ import org.apache.spark.sql.catalyst.expressions.{And, EqualTo, Expression, Join
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.sql.execution.{BinaryNode, SparkPlan}
-import org.apache.spark.sql.execution.metric.SQLMetrics
+import org.apache.spark.sql.execution.metric.{LongSQLMetric, SQLMetrics}
 
 /**
  * Performs an inner hash join of two child relations by first shuffling the data using the join
@@ -43,7 +43,8 @@ case class ShuffledHashJoin(
     "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"),
     "numStreamedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of streamed matched rows"),
      NUM_PARTITIONS_KEY ->SQLMetrics.createLongMetric(sparkContext, "number of partitions"),
-    "numHashedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of hashed matched rows"))
+    "numHashedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of hashed matched rows"),
+      NUM_ROWS_KEY-> SQLMetrics.createLongMetric(sparkContext, "number of rows"))
 
   override def outputPartitioning: Partitioning = joinType match {
     case Inner => PartitioningCollection(Seq(left.outputPartitioning, right.outputPartitioning))
@@ -58,6 +59,18 @@ case class ShuffledHashJoin(
   override def requiredChildDistribution: Seq[Distribution] = //UnspecifiedDistribution :: UnspecifiedDistribution :: Nil
     ClusteredDistribution(leftKeys) :: ClusteredDistribution(rightKeys) :: Nil
 
+
+  override def selectivity(): Double = {
+    val leftRows =   left.metrics(NUM_ROWS_KEY).asInstanceOf[LongSQLMetric].value.value
+    val rightRows =  right.metrics(NUM_ROWS_KEY).asInstanceOf[LongSQLMetric].value.value
+    val outputRows = getOutputRows
+    val rows = leftRows*rightRows
+    if(rows <= 0)
+      Double.MinPositiveValue
+    else
+      outputRows/rows
+  }
+  override def rows(): Long = children.map(_.rows()).product
 
   override def simpleHash: Int = {
     var h = 17

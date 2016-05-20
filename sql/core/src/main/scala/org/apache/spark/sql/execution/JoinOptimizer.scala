@@ -1,12 +1,14 @@
 package org.apache.spark.sql.execution
 
+import javax.sound.sampled.FloatControl.Type
+
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{ExperimentalMethods, SQLContext}
 import org.apache.spark.sql.catalyst.expressions.{And, Expression, PredicateHelper}
 import org.apache.spark.sql.catalyst.optimizer.{MJoinGeneralOptimizer, MJoinOrderingOptimizer, MJoinPushPredicateThroughJoin, Optimizer}
 import org.apache.spark.sql.catalyst.plans.Inner
 import org.apache.spark.sql.catalyst.plans._
-import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan, Project, Sample}
 import org.apache.spark.sql.execution.datasources.{HolderLogicalRelation, LogicalRelation}
 import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 
@@ -44,6 +46,11 @@ object JoinOptimizer{
 
 class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLContext) extends PredicateHelper with Logging{
   private var originalOrder : Option[LogicalPlan] = None
+
+  val chunkedRels = findChunkedBaseRelPlans()
+  val _trainingSet = mutable.HashMap[Int,LogicalPlan]()
+
+  lazy val mJoinLogical: Option[LogicalPlan] = analyzeWithMJoin(doPermutations(baseRelations))
   lazy private val (baseRelations, originalConditions): (Seq[LogicalPlan], Seq[Expression]) =
     extractJoins(originPlan,splitConjunctivePredicates).
       getOrElse((Seq(), Seq()))
@@ -51,9 +58,6 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   lazy private val _otherConditions= mutable.Set[Expression]()
   lazy private val eqClasses: scala.collection.mutable.Set[EquivalencesClass] = mutable.Set()
   lazy private val accumulator: mutable.Seq[LogicalPlan] = mutable.Seq()
-  val chunkedRels = findChunkedBaseRelPlans()
-  val mJoinLogical: Option[LogicalPlan] = analyzeWithMJoin(doPermutations(baseRelations))
-
   private val all_joins: mutable.Map[Int, mutable.ListBuffer[LogicalPlan]] = mutable.Map()
 
 
@@ -119,7 +123,8 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
         val (plans, conditions) = flattenJoin(j,f)
         (plans, conditions ++ f(filterCondition))
       case logical.Project(fields, child) => flattenJoin(child,f)
-      case logical.Aggregate(_, _, child) => flattenJoin(child,f)
+      case logical.Aggregate(a, b, child) =>
+        flattenJoin(child,f)
       case logical.GlobalLimit(_, child) => flattenJoin(child,f)
       case logical.LocalLimit(_, child) => flattenJoin(child,f)
       case logical.Sort(_,_,child)=>flattenJoin(child,f)
@@ -170,27 +175,25 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   }
 
 
-  private def createJoinCondition(left: Seq[LogicalPlan], right: Seq[LogicalPlan]): Seq[Expression] = {
+  private def createJoinCondition(left: Seq[LogicalPlan], right: Seq[LogicalPlan]): Set[Expression] = {
 
 
-    val joinConditions = eqClasses.flatMap(eqClass =>
-      eqClass.generateJoinImpliedEqualities(left.toSet, right.toSet).headOption
-      ).toSeq
-
-
+    val joinConditions = eqClasses.map(eqClass =>
+       eqClass.generateJoinImpliedEqualities(left.toSet, right.toSet)
+      ).filter(_.isDefined).map(_.get).toSet
     joinConditions
-
   }
 
   private def combinePredicates(conditions: List[Expression]): Expression = {
     conditions match {
       case cond1 :: cond2 :: Nil => And(cond1, cond2)
       case cond :: xs => And(cond, combinePredicates(xs))
+      case Nil => null
     }
   }
 
   private def createOrderedJoin(input: Seq[LogicalPlan],
-                                conditions: Seq[Expression]): LogicalPlan = {
+                                conditions: Set[Expression]): LogicalPlan = {
     assert(input.size >= 2)
     if (input.size == 2) {
       Join(input(0), input(1), Inner, conditions.reduceLeftOption(And))
@@ -431,8 +434,11 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       logInfo(eqClasses.toString())
       logInfo("*** othr  Conditions ***")
       logInfo(_otherConditions.toString())
-
+      println(_trainingSet)
       permutations
+
+
+
     }
     else {
       Nil
@@ -450,32 +456,47 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   }
 
   /** Returns a list containing all permutations of the input list */
-  private[this] def permute(xs: List[LogicalPlan]): List[(LogicalPlan,
+ def permute(xs: List[LogicalPlan]): List[(LogicalPlan,
     List[Expression])] = xs match {
     case Nil =>Nil
 
     // special case lists of length 1 and 2 for better performance
     case t :: Nil => List((t, Nil))
     case t :: u :: Nil =>
-      val conditions1 = createJoinCondition(Seq(t), Seq(u)).toList
-      val conditions2 = createJoinCondition(Seq(u), Seq(t)).toList
+      val conditions1 = createJoinCondition(Seq(t), Seq(u))
+      val conditions2 = createJoinCondition(Seq(u), Seq(t))
 
       if (conditions1.nonEmpty && conditions2.nonEmpty) {
-
-        List((createOrderedJoin(Seq(t, u), conditions1), conditions1))
+        val join = createOrderedJoin(Seq(t, u), conditions1)
+        val semanticHash = conditions1.map(_.semanticHash()).sum
+        _trainingSet.getOrElseUpdate(semanticHash ,  join )
+        List((join, conditions1.toList))
       } else
         Nil
 
     case _ =>
-      for ((y, ys) <- selections(xs); ps <- permute(ys); conditions <- Seq(createJoinCondition(Seq(ps._1), Seq(y))) if(conditions.nonEmpty))
+      for ((y, ys) <- selections(xs); ps <- permute(ys) ;conditions = createJoinCondition(Seq(ps._1), Seq(y) ) if conditions.nonEmpty)
         yield (createOrderedJoin(Seq(ps._1,y),conditions ), ps._2 ++ conditions)
 
   }
 
+  private def buildTrainningJoin(logical : LogicalPlan): Seq[LogicalPlan] ={
 
+    logical match {
+
+      case j @Join(l,r,t,Some(condition)) =>
+        val ls = Sample(0.0,0.1,false,System.currentTimeMillis(),l)()
+        val rs = Sample(0.0,0.1,false,System.currentTimeMillis(),r)()
+        val newJoin = Join(ls,rs,t,Some(condition))
+        val project = Project(condition.references.toSeq,newJoin)
+
+        project ::Nil
+      case _ => Nil
+    }
+
+  }
 
   //private[this] def CreateOptimizedReorderedPlan(plan : LogicalPlan , targetPlan : LogicalPlan): LogicalPlan = {
-
 //
   //}
 
