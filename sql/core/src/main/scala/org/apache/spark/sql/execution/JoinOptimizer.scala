@@ -480,7 +480,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   }
 
-  private def buildTrainningJoin(logical : LogicalPlan): Seq[LogicalPlan] ={
+  /*private def buildTrainningJoin(logical : LogicalPlan): Seq[LogicalPlan] ={
 
     logical match {
 
@@ -494,7 +494,22 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       case _ => Nil
     }
 
-  }
+  }*/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   //private[this] def CreateOptimizedReorderedPlan(plan : LogicalPlan , targetPlan : LogicalPlan): LogicalPlan = {
 //

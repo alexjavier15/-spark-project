@@ -28,6 +28,7 @@ import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 import org.apache.spark.sql.execution.exchange.EnsureRequirements
 
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 
 /**
   * Performs an inner hash join of two child relations.  When the output RDD of this operator is
@@ -219,8 +220,11 @@ case class BroadcastMJoin(
 
         val newPlan = _bestPlan transformUp {
 
+          case join @ ShuffledHashJoin(_,_,_,_,_,_,_) =>
+            Sample(0,0.1,false,System.currentTimeMillis(),join)
+
           case filter @ Filter(_ ,  scan@DataSourceScan(_,_,h :  HadoopPfRelation,_)  )=>
-               Sample(0.00,0.05,false,System.currentTimeMillis(),filter)
+              LocalLimit(10000,filter)
 
           case scan@DataSourceScan(_,_,h :  HadoopPfRelation,_) =>
             val ds = subplan.get(h.semanticHash).get
@@ -240,6 +244,17 @@ case class BroadcastMJoin(
 
         if (sqlContext.conf.mJoinSamplingEnabled ) {
 
+          /*val rddBuffer = rdd.randomSplit( Array.fill(10)(0.1))
+
+          rddBuffer.foreach(rdd0 => {
+            val l = rdd0.
+
+            println( l.)
+            executedPlan.printMetrics
+          }
+          )
+
+          System.exit(0)*/
           rdd.count
 
           executedPlan.printMetrics
@@ -258,6 +273,8 @@ case class BroadcastMJoin(
 
 
           }*/
+          //System.exit(0)
+
 
          return  EnsureRequirements(this.sqlContext.conf)(findRootJoin(_bestPlan)).execute()
 
@@ -437,12 +454,12 @@ object SelectivityPlan {
             selPlan.setNumPartitionsFromExecution(sparkPlan.getNumPartitions)
         }
       case f@Filter(condition,child0@DataSourceScan(_, _, _, _)) =>
-        _selectivityPlanNodes.get(f.semanticHash).get.setRowsFromExecution(f.rows())
+        _selectivityPlanNodes.get(f.semanticHash).get.setRowsFromExecution(f.getOutputRows)
 
       case u: UnaryNode => updatefromExecution(u.child)
 
 
-      case u: LeafNode => _selectivityPlanNodes.get(u.semanticHash).get.setRowsFromExecution(u.rows())
+      case u: LeafNode => _selectivityPlanNodes.get(u.semanticHash).get.setRowsFromExecution(u.getOutputRows)
 
     }
 

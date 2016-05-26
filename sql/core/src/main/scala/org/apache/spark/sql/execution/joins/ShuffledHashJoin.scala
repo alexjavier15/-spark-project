@@ -43,8 +43,9 @@ case class ShuffledHashJoin(
     "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"),
     "numStreamedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of streamed matched rows"),
      NUM_PARTITIONS_KEY ->SQLMetrics.createLongMetric(sparkContext, "number of partitions"),
-    "numHashedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of hashed matched rows"),
-      NUM_ROWS_KEY-> SQLMetrics.createLongMetric(sparkContext, "number of rows"))
+    "numHashedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of hashed matched rows")
+    //NUM_ROWS_KEY-> SQLMetrics.createLongMetric(sparkContext, "number of rows")
+  )
 
   override def outputPartitioning: Partitioning = joinType match {
     case Inner => PartitioningCollection(Seq(left.outputPartitioning, right.outputPartitioning))
@@ -61,16 +62,13 @@ case class ShuffledHashJoin(
 
 
   override def selectivity(): Double = {
-    val leftRows =   left.metrics(NUM_ROWS_KEY).asInstanceOf[LongSQLMetric].value.value
-    val rightRows =  right.metrics(NUM_ROWS_KEY).asInstanceOf[LongSQLMetric].value.value
-    val outputRows = getOutputRows
-    val rows = leftRows*rightRows
-    if(rows <= 0)
+
+    if(getOutputRows <= 0)
       Double.MinPositiveValue
     else
-      outputRows/rows
+      children.map(x => 1.0/x.getOutputRows).foldLeft(getOutputRows.toDouble)(_*_)
   }
-  override def rows(): Long = children.map(_.rows()).product
+ // override def rows(): Long = children.map(_.rows()).product
 
   override def simpleHash: Int = {
     var h = 17
@@ -94,6 +92,7 @@ case class ShuffledHashJoin(
 
   protected override def doExecute(): RDD[InternalRow] = {
     val numOutputRows = longMetric("numOutputRows")
+   // val numRows = longMetric(NUM_ROWS_KEY)
     val hashTableSize = statistics match {
 
       case Some(s) if buildSide == BuildRight =>
@@ -109,6 +108,7 @@ case class ShuffledHashJoin(
       val joinedRow = new JoinedRow
       joinType match {
         case Inner =>
+
           hashJoin(streamIter, hashed, numOutputRows)
 
         case LeftSemi =>

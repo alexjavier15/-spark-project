@@ -157,11 +157,12 @@ private[sql] case class DataSourceScan(
   }
 
 
-  override def rows(): Long = capRows(getOutputRows)
+ // override def rows(): Long = capRows(getOutputRows)
 
   private[sql] override lazy val metrics = Map(
-    "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows"),
-    NUM_ROWS_KEY-> SQLMetrics.createLongMetric(sparkContext, "number of rows"))
+    "numOutputRows" -> SQLMetrics.createLongMetric(sparkContext, "number of output rows")
+    //NUM_ROWS_KEY-> SQLMetrics.createLongMetric(sparkContext, "number of rows")
+  )
 
   val outputUnsafeRows = relation match {
     case r: HadoopFsRelation if r.fileFormat.isInstanceOf[ParquetSource] =>
@@ -203,10 +204,8 @@ private[sql] case class DataSourceScan(
     }
 
     val numOutputRows = longMetric("numOutputRows")
-    val numRows = longMetric("numRows")
     unsafeRow.map { r =>
       numOutputRows += 1
-      numRows+=1
       r
     }
   }

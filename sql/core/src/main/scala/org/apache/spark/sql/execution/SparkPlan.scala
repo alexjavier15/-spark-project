@@ -47,7 +47,7 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
 
   val OUTPUT_ROWS_KEY : String = "numOutputRows"
   val NUM_PARTITIONS_KEY : String = "numPartitions"
-  val NUM_ROWS_KEY : String = "numRows"
+  //val NUM_ROWS_KEY : String = "numRows"
   /**
    * A handle to the SQL Context that was used to create this plan.   Since many operators need
    * access to the sqlContext for RDD operations or configuration this field is automatically
@@ -64,7 +64,7 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
     if(getOutputRows <= 0)
      Double.MinPositiveValue
     else
-      getOutputRows.asInstanceOf[Double]/children.map(_.rows).product
+      children.map(x => 1.0/x.getOutputRows).foldLeft(getOutputRows.toDouble)(_*_)
 
   }
   protected def  capRows(rows : Long): Long = rows match {
@@ -93,14 +93,14 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
 
   }
 
-  def rows() : Long ={
+  /*def rows() : Long ={
     if (metrics.contains(NUM_ROWS_KEY)) {
     val rows = metrics(NUM_ROWS_KEY).asInstanceOf[LongSQLMetric].value.value
     capRows(rows)
   }else
   throw new UnsupportedOperationException(s"$nodeName does not contains num rows metric")
+}*/
 
-}
 
 
 def planCost() : Long = {
@@ -534,7 +534,7 @@ private[sql] trait UnaryNode extends SparkPlan {
   }
 
 
-  override def rows(): Long = child.rows()
+  //override def rows(): Long = child.rows()
 
   override def semanticHash: Int =  child.semanticHash
 
