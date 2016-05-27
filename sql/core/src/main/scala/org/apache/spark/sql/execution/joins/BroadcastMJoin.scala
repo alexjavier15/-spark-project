@@ -245,6 +245,8 @@ case class BroadcastMJoin(
 
 
           val newPlan = newPlan0 transformUp {
+            case join @ ShuffledHashJoin(_,_,_,_,_,_,_) =>
+              LocalLimit(10000000,join)
 
             case scan@DataSourceScan(output, rdd0, h: HadoopPfRelation, metadata) =>
               val ds = subplan.get(h.semanticHash).get
