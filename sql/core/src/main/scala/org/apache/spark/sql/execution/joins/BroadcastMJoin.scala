@@ -50,7 +50,7 @@ case class BroadcastMJoin(
   private var _samplingFactor : Option[Long] = None
   private var _pendingSubplans  =initSubplans()
   private var _lastCost = 0.0
-  private val split = Array.fill(100)(0.01)
+  private val split = Array.fill(1000)(0.001)
   // Keeps track of all persisted RDDs
   private val _subplansMap = subplans.getOrElse(Nil).groupBy{
     subplan => subplan.simpleHash}.map{ case (a,b)=> a -> b.head }
