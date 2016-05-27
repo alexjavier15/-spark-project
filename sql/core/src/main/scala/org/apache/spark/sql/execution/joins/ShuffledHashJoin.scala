@@ -63,8 +63,8 @@ case class ShuffledHashJoin(
 
   override def selectivity(): Double = {
 
-    if(getOutputRows <= 0)
-      Double.MinPositiveValue
+    if(longMetric("numOutputRows").value.value <= 0)
+      Double.MinValue
     else
       children.map(x => 1.0/x.getOutputRows).foldLeft(getOutputRows.toDouble)(_*_)
   }
