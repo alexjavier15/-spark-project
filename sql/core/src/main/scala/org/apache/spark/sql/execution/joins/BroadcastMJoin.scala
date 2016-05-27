@@ -145,16 +145,21 @@ case class BroadcastMJoin(
 
     logInfo("****Selectivity Plans****")
     logInfo(SelectivityPlan._selectivityPlanRoots.toString())
-    val bestPlan =SelectivityPlan._selectivityPlanRoots.
+    val validPlans = SelectivityPlan._selectivityPlanRoots.filter{
+      case (hc,selPlan)  =>selPlan.isValid
+      case _ => false
+
+    }
+    val bestPlan =validPlans.
       minBy{
-        case (hc,selPlan) if selPlan.isValid => selPlan.planCost()
+        case (hc,selPlan) => selPlan.planCost()
         case _ => Double.MaxValue
       }
     logInfo("****Min  plan****")
     logInfo(bestPlan.toString())
     val oldPlan = _bestPlan
     val _bestLogical = _subplansMap.get(bestPlan._1).get
-    found = bestPlan._1 != _bestPlan.semanticHash
+    found =  (bestPlan._1 != _bestPlan.semanticHash)
       val queryExecution = new QueryExecution(sqlContext, _bestLogical)
 
 
@@ -217,9 +222,9 @@ case class BroadcastMJoin(
       passes += 1
 
 
-      _bestPlan transformUp {
+     val  newPlan0 = _bestPlan transformUp {
 
-        case scan@DataSourceScan(_, _, h: HadoopPfRelation, _) =>
+        case scan@DataSourceScan(_, rdd0, h: HadoopPfRelation, _) =>
           val ds = subplan.get(h.semanticHash).get
           assert(ds.semanticHash == scan.semanticHash)
           rddMap += ds.semanticHash -> ds.execute().randomSplit(Array.fill(10)(0.1))
@@ -239,7 +244,7 @@ case class BroadcastMJoin(
           val partitionSeq = (relationIndex zip rddPermutations.next()).toMap
 
 
-          val newPlan = _bestPlan transformUp {
+          val newPlan = newPlan0 transformUp {
 
             case scan@DataSourceScan(output, rdd0, h: HadoopPfRelation, metadata) =>
               val ds = subplan.get(h.semanticHash).get
@@ -253,7 +258,8 @@ case class BroadcastMJoin(
           logInfo("AFTER TRANSFORMATION:")
 
           logInfo(newPlan.toString)
-
+          newPlan.resetChildrenMetrics
+          newPlan.printMetrics
           val executedPlan = EnsureRequirements(this.sqlContext.conf)(newPlan)
           val rdd = executedPlan.execute()
 
@@ -265,9 +271,11 @@ case class BroadcastMJoin(
           updateSelectivities(executedPlan)
           updateStatisticsTo(_bestPlan)
           rdd.unpersist(false)
+
         }
       }
     }
+    System.exit(0)
     EnsureRequirements(this.sqlContext.conf)(findRootJoin(_bestPlan)).execute()
   }
 
@@ -278,12 +286,16 @@ case class BroadcastMJoin(
 }
 
 case class FilterStatInfo( filter : Expression
-                           ) extends Serializable {
+                           , children : Seq[FilterStatInfo] = Seq() ) extends Serializable {
 
   private[this] var _selectivity : Double  = Double.MinValue
   private[this] val  _derived : HashSet[FilterStatInfo] = HashSet[FilterStatInfo]()
 
-  def selectivity : Double = _selectivity
+  def selectivity : Double = {
+    if (_selectivity < 0 && children.size > 1)
+      children.map(_.selectivity).product
+    else _selectivity
+  }
 
   override def toString: String = filter.toString + " , [ Sel :"+ selectivity + " ]"
 
@@ -298,13 +310,18 @@ case class FilterStatInfo( filter : Expression
 
   }
 
+
+
+
+
   override def equals(that: scala.Any): Boolean = that match {
-    case FilterStatInfo(f) => f.semanticEquals(filter)
+    case f : FilterStatInfo => f.filter.semanticEquals(filter)
     case _ => false
   }
 
   override def hashCode(): Int = filter.semanticHash()
 }
+
 object SelectivityPlan {
 
   val _selectivityPlanNodes = HashMap[Int, SelectivityPlan]()
@@ -313,7 +330,7 @@ object SelectivityPlan {
 
   val _filterStats = HashMap[Int, FilterStatInfo]()
 
-  def apply(plan: logical.LogicalPlan): SelectivityPlan = fromSparkPlan(plan)
+  def apply(plan: logical.LogicalPlan): SelectivityPlan = fromLogicPlan(plan)
 
   private def splitConjunctivePredicates(condition: Expression): Seq[Expression] = {
     condition match {
@@ -402,7 +419,18 @@ object SelectivityPlan {
 
     leftChildKeys map { keys =>
       val condition = (keys zip rightKeys).map { case (l, r) => EqualTo(l, r) }
-      _filterStats.getOrElseUpdate(condition.map(_.semanticHash()).sum,FilterStatInfo(condition.reduceLeft(And)))
+
+
+      _filterStats.getOrElseUpdate(condition.map(_.semanticHash()).sum,
+        if(condition.size > 2){
+          val children = condition.map(c => _filterStats.getOrElseUpdate(c.semanticHash(), FilterStatInfo(c)))
+          FilterStatInfo(condition.reduceLeft(And),children)
+        }
+        else
+          FilterStatInfo(condition.reduceLeft(And))
+
+
+      )
     }
 
   }
@@ -439,20 +467,27 @@ object SelectivityPlan {
 
   }*/
 
-  private[this] def fromSparkPlan(sparkPlan: logical.LogicalPlan): SelectivityPlan = {
+  private[this] def fromLogicPlan(l: logical.LogicalPlan): SelectivityPlan = {
 
 
-   sparkPlan match {
+   l match {
       case join  @  logical.Join(left,right,_,Some(condition)) =>
 
         val simpleHashCode = join.simpleHash
         val semanticHashCode = join.semanticHash
+        val conditions = splitConjunctivePredicates(condition)
+        val filterStatInfo = _filterStats.getOrElseUpdate(conditions.map(_.semanticHash()).sum,
+          if(conditions.size > 2){
+            val children = conditions.map(c => _filterStats.getOrElseUpdate(c.semanticHash(), FilterStatInfo(c)))
+            FilterStatInfo(condition,children)
+          }
+          else
+            FilterStatInfo(condition))
 
-        val filterStatInfo = _filterStats.getOrElseUpdate(splitConjunctivePredicates(condition).map(_.semanticHash()).sum,FilterStatInfo(condition) )
         _selectivityPlanNodes.getOrElseUpdate(simpleHashCode, {
 
-        val newNode = HashCondition(fromSparkPlan(join.left),
-            fromSparkPlan(join.right),
+        val newNode = HashCondition(fromLogicPlan(join.left),
+            fromLogicPlan(join.right),
             filterStatInfo, simpleHashCode)
          val set=  _selectivityPlanNodesSemantic.getOrElseUpdate(semanticHashCode,HashSet[SelectivityPlan]())
             set+=newNode
@@ -472,7 +507,7 @@ object SelectivityPlan {
             ScanCondition(p.output, Some(condition), f.semanticHash)
           })
 
-        case _ => fromSparkPlan(u.child)
+        case _ => fromLogicPlan(u.child)
       }
 
       case  l @LogicalRelation(h: HadoopPfRelation, a, b) =>

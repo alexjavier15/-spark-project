@@ -59,6 +59,7 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
   protected def sparkContext = sqlContext.sparkContext
   var statistics : Option[Map[String,Long]] = None
   var hasSelectivity : Boolean = false
+
   def selectivity() : Double = {
 
     if(getOutputRows <= 0)
@@ -362,6 +363,11 @@ def planCost() : Long = {
     logInfo(nodeName + " :" +metrics)
     logInfo("Selectivity" + " :" +selectivity())
     children.foreach(_.printMetrics)
+
+  }
+  def resetChildrenMetrics : Unit = {
+    resetMetrics()
+    children.foreach(_.resetChildrenMetrics)
 
   }
 
