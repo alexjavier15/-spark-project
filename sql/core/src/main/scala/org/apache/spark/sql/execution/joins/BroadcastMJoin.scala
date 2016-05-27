@@ -222,7 +222,7 @@ case class BroadcastMJoin(
         case scan@DataSourceScan(_, _, h: HadoopPfRelation, _) =>
           val ds = subplan.get(h.semanticHash).get
           assert(ds.semanticHash == scan.semanticHash)
-          rddMap += ds.semanticHash -> scan.execute().randomSplit(Array.fill(10)(0.1))
+          rddMap += ds.semanticHash -> ds.execute().randomSplit(Array.fill(10)(0.1))
           ds
 
       }
