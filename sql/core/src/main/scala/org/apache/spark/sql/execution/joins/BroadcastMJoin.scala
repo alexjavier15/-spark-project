@@ -227,15 +227,6 @@ case class BroadcastMJoin(
 
       }
 
-      rddMap.values.foreach(
-        seq=>{
-          println(seq.map(_.count()))
-
-        }
-
-
-      )
-      System.exit(0)
       if (!tested) {
         logInfo("EXECUTING:")
 
@@ -277,7 +268,6 @@ case class BroadcastMJoin(
         }
       }
     }
-    System.exit(0)
     EnsureRequirements(this.sqlContext.conf)(findRootJoin(_bestPlan)).execute()
   }
 
