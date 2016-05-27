@@ -27,8 +27,7 @@ import org.apache.spark.sql.execution.datasources.LogicalRelation
 import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 import org.apache.spark.sql.execution.exchange.EnsureRequirements
 
-import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 
 /**
   * Performs an inner hash join of two child relations.  When the output RDD of this operator is
@@ -45,11 +44,13 @@ case class BroadcastMJoin(
 
   private var currentSubplans: Seq[Seq[Int]] = Seq(Seq())
   var key = -1
+  var found = false
   private val numSampledRows : Int = 10000
   private var _bestPlan = child
   private var _samplingFactor : Option[Long] = None
   private var _pendingSubplans  =initSubplans()
   private var _lastCost = 0.0
+  private val split = Array.fill(10)(0.1)
   // Keeps track of all persisted RDDs
   private val _subplansMap = subplans.getOrElse(Nil).groupBy{
     subplan => subplan.simpleHash}.map{ case (a,b)=> a -> b.head }
@@ -60,29 +61,22 @@ case class BroadcastMJoin(
   //}
 
 
+  private def combine[A]( chunks: List[Seq[A]]): Seq[Seq[A]] = {
+
+    chunks match {
+      case x :: Nil => x.map(Seq(_))
+      case x :: xs :: Nil =>
+        for (y <- x; ys <- xs)
+          yield Seq(y,ys)
+      case x::xs =>
+        for (y <- x; ys <- combine(xs))
+          yield y+:ys
+    }
+  }
 
   private[this] def initSubplans():Iterator[Seq[SparkPlan]] ={
-    /** For each element x in List xss, returns (x, xss - x) */
-
-
-    def combine( chunks: List[Seq[SparkPlan]]): Seq[Seq[SparkPlan]] = {
-
-      chunks match {
-        case x :: Nil => x.map(Seq(_))
-        case x :: xs :: Nil =>
-          for (y <- x; ys <- xs)
-            yield Seq(y,ys)
-        case x::xs =>
-          for (y <- x; ys <- combine(xs))
-            yield y+:ys
-      }
-    }
-
-
-    val res = combine(baseRelations.values.toList)
-
-
-
+/** For each element x in List xss, returns (x, xss - x)   **/
+    val res = combine[SparkPlan](baseRelations.values.toList)
     res.toIterator
 
   }
@@ -92,13 +86,13 @@ case class BroadcastMJoin(
 
 
   /**
-    * Overridden by concrete implementations of SparkPlan. It is guaranteed to run before any
-    * `execute` of SparkPlan. This is helpful if we want to set up some state before executing the
-    * query, e.g., `BroadcastHashJoin` uses it to broadcast asynchronously.
-    *
-    * Note: the prepare method has already walked down the tree, so the implementation doesn't need
-    * to call children's prepare methods.
-    */
+  * Overridden by concrete implementations of SparkPlan. It is guaranteed to run before any
+  * `execute` of SparkPlan. This is helpful if we want to set up some state before executing the
+  * query, e.g., `BroadcastHashJoin` uses it to broadcast asynchronously.
+  *
+  * Note: the prepare method has already walked down the tree, so the implementation doesn't need
+  * to call children's prepare methods.
+  */
   override protected def doPrepare(): Unit = {
 
     //logInfo(child.toString)
@@ -159,7 +153,8 @@ case class BroadcastMJoin(
     logInfo("****Min  plan****")
     logInfo(bestPlan.toString())
     val oldPlan = _bestPlan
-      val _bestLogical = _subplansMap.get(bestPlan._1).get
+    val _bestLogical = _subplansMap.get(bestPlan._1).get
+    found = bestPlan._1 != _bestPlan.semanticHash
       val queryExecution = new QueryExecution(sqlContext, _bestLogical)
 
 
@@ -198,9 +193,10 @@ case class BroadcastMJoin(
     }
 
   }
+
   override protected def doExecute(): RDD[InternalRow] = {
 
-    val rddBuffer = mutable.ArrayBuffer[RDD[InternalRow]]()
+    val rddBuffer = ArrayBuffer[RDD[InternalRow]]()
     sqlContext.setConf("spark.sql.mjoin", "false")
     var executedRDD: RDD[InternalRow] = null
     var duration: Long = 0L
@@ -208,9 +204,38 @@ case class BroadcastMJoin(
     var passes = 0
     while (_pendingSubplans.hasNext) {
 
-      val subplan = _pendingSubplans.next().map { plan => plan.semanticHash-> plan }.toMap
+      val subplan = _pendingSubplans.next().map { plan => plan.semanticHash -> plan }.toMap
       val start = System.currentTimeMillis()
-      passes+=1
+      val rddIds = Array.fill(baseRelations.size)(0 until 10).toList
+      val rddMap = HashMap[Int, Array[RDD[InternalRow]]]()
+      val relationIndex = baseRelations.keySet.toSeq
+
+      val rddPermutations0 = combine[Int](rddIds)
+      val rddPermutations = rddPermutations0.toIterator
+
+
+      passes += 1
+
+
+      _bestPlan transformUp {
+
+        case scan@DataSourceScan(_, _, h: HadoopPfRelation, _) =>
+          val ds = subplan.get(h.semanticHash).get
+          assert(ds.semanticHash == scan.semanticHash)
+          rddMap += ds.semanticHash -> scan.execute().randomSplit(Array.fill(10)(0.1))
+          ds
+
+      }
+
+      rddMap.values.foreach(
+        seq=>{
+          println(seq.map(_.count()))
+
+        }
+
+
+      )
+      System.exit(0)
       if (!tested) {
         logInfo("EXECUTING:")
 
@@ -218,43 +243,29 @@ case class BroadcastMJoin(
         logInfo("BEFORE TRANSFORMATION:")
         logInfo(_bestPlan.toString)
 
-        val newPlan = _bestPlan transformUp {
 
-          case join @ ShuffledHashJoin(_,_,_,_,_,_,_) =>
-            Sample(0,0.1,false,System.currentTimeMillis(),join)
-
-          case filter @ Filter(_ ,  scan@DataSourceScan(_,_,h :  HadoopPfRelation,_)  )=>
-              LocalLimit(10000,filter)
-
-          case scan@DataSourceScan(_,_,h :  HadoopPfRelation,_) =>
-            val ds = subplan.get(h.semanticHash).get
-            assert(ds.semanticHash == scan.semanticHash  )
-           // getPartition0RDD(ds)
-            ds
-
-        }
+        while (rddPermutations.hasNext && !found) {
+          val partitionSeq = (relationIndex zip rddPermutations.next()).toMap
 
 
-        logInfo("AFTER TRANSFORMATION:")
+          val newPlan = _bestPlan transformUp {
 
-        logInfo(newPlan.toString)
+            case scan@DataSourceScan(output, rdd0, h: HadoopPfRelation, metadata) =>
+              val ds = subplan.get(h.semanticHash).get
+              assert(ds.semanticHash == scan.semanticHash)
+              val newRDD = rddMap(h.semanticHash)(partitionSeq(h.semanticHash))
+              DataSourceScan(output,newRDD, h, metadata)
 
-        val executedPlan = EnsureRequirements(this.sqlContext.conf)(newPlan)
-        val rdd = executedPlan.execute()
-
-        if (sqlContext.conf.mJoinSamplingEnabled ) {
-
-          /*val rddBuffer = rdd.randomSplit( Array.fill(10)(0.1))
-
-          rddBuffer.foreach(rdd0 => {
-            val l = rdd0.
-
-            println( l.)
-            executedPlan.printMetrics
           }
-          )
 
-          System.exit(0)*/
+
+          logInfo("AFTER TRANSFORMATION:")
+
+          logInfo(newPlan.toString)
+
+          val executedPlan = EnsureRequirements(this.sqlContext.conf)(newPlan)
+          val rdd = executedPlan.execute()
+
           rdd.count
 
           executedPlan.printMetrics
@@ -263,45 +274,13 @@ case class BroadcastMJoin(
           updateSelectivities(executedPlan)
           updateStatisticsTo(_bestPlan)
           rdd.unpersist(false)
-          /*val childPlans = child.extractNodes[DataSourceScan]
-          val newPlan = _bestPlan transform {
-
-            case scan@DataSourceScan(_,_,h :  HadoopPfRelation,_) =>
-              val ds = childPlans.find( c => c.semanticHash ==h.semanticHash).get
-              assert(ds.semanticHash == scan.semanticHash  )
-                ds
-
-
-          }*/
-          //System.exit(0)
-
-
-         return  EnsureRequirements(this.sqlContext.conf)(findRootJoin(_bestPlan)).execute()
-
-        } else {
-         // rdd.persist(MEMORY_AND_DISK)
-          rdd.count()
-          executedPlan.printMetrics
-          logInfo("Cost :" + executedPlan.planCost)
-          updateSelectivities(executedPlan)
-          rddBuffer += rdd
         }
-
-
-
-
       }
-      val end = System.currentTimeMillis()
-      duration += (end - start)
-
     }
-    logInfo("Duration Total: "+ duration)
-
-
-    sparkContext.union(rddBuffer)
-
-
+    System.exit(0)
+    EnsureRequirements(this.sqlContext.conf)(findRootJoin(_bestPlan)).execute()
   }
+
 
   override def output: Seq[Attribute] = child.output
 
@@ -312,7 +291,7 @@ case class FilterStatInfo( filter : Expression
                            ) extends Serializable {
 
   private[this] var _selectivity : Double  = Double.MinValue
-  private[this] val  _derived : mutable.Set[FilterStatInfo] = mutable.Set[FilterStatInfo]()
+  private[this] val  _derived : HashSet[FilterStatInfo] = HashSet[FilterStatInfo]()
 
   def selectivity : Double = _selectivity
 
@@ -338,11 +317,11 @@ case class FilterStatInfo( filter : Expression
 }
 object SelectivityPlan {
 
-  val _selectivityPlanNodes = mutable.HashMap[Int, SelectivityPlan]()
-  val _selectivityPlanNodesSemantic = mutable.HashMap[Int, mutable.Set[SelectivityPlan]]()
-  val _selectivityPlanRoots = mutable.HashMap[Int, SelectivityPlan]()
+  val _selectivityPlanNodes = HashMap[Int, SelectivityPlan]()
+  val _selectivityPlanNodesSemantic = HashMap[Int, HashSet[SelectivityPlan]]()
+  val _selectivityPlanRoots = HashMap[Int, SelectivityPlan]()
 
-  val _filterStats = mutable.HashMap[Int, FilterStatInfo]()
+  val _filterStats = HashMap[Int, FilterStatInfo]()
 
   def apply(plan: logical.LogicalPlan): SelectivityPlan = fromSparkPlan(plan)
 
@@ -485,7 +464,7 @@ object SelectivityPlan {
         val newNode = HashCondition(fromSparkPlan(join.left),
             fromSparkPlan(join.right),
             filterStatInfo, simpleHashCode)
-         val set=  _selectivityPlanNodesSemantic.getOrElseUpdate(semanticHashCode, mutable.Set[SelectivityPlan]())
+         val set=  _selectivityPlanNodesSemantic.getOrElseUpdate(semanticHashCode,HashSet[SelectivityPlan]())
             set+=newNode
           newNode
         })
@@ -601,9 +580,9 @@ case class ScanCondition( outputSet : Seq[Attribute],
   }
 
   /**
-    * Returns a Seq of the children of this node.
-    * Children should not change. Immutability required for containsChild optimization
-    */
+  * Returns a Seq of the children of this node.
+  * Children should not change. Immutability required for containsChild optimization
+  */
   override def children: Seq[ScanCondition] = Nil
 
   override def planCost(): Double = rows
@@ -688,4 +667,6 @@ case class HashCondition(left : SelectivityPlan,
 
 
   override def children: Seq[SelectivityPlan] = Seq(left) ++ Seq(right)
+
+
 }

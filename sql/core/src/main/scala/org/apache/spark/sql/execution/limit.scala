@@ -95,6 +95,7 @@ case class LocalLimit(limit: Int, child: SparkPlan) extends BaseLimit {
   override def outputOrdering: Seq[SortOrder] = child.outputOrdering
 }
 
+
 /**
  * Take the first `limit` elements of the child's single output partition.
  */
