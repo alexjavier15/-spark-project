@@ -50,7 +50,7 @@ case class BroadcastMJoin(
   private var _samplingFactor : Option[Long] = None
   private var _pendingSubplans  =initSubplans()
   private var _lastCost = 0.0
-  private val split = Array.fill(10)(0.1)
+  private val split = Array.fill(100)(0.01)
   // Keeps track of all persisted RDDs
   private val _subplansMap = subplans.getOrElse(Nil).groupBy{
     subplan => subplan.simpleHash}.map{ case (a,b)=> a -> b.head }
@@ -227,7 +227,7 @@ case class BroadcastMJoin(
         case scan@DataSourceScan(_, rdd0, h: HadoopPfRelation, _) =>
           val ds = subplan.get(h.semanticHash).get
           assert(ds.semanticHash == scan.semanticHash)
-          rddMap += ds.semanticHash -> ds.execute().randomSplit(Array.fill(10)(0.1))
+          rddMap += ds.semanticHash -> ds.execute().randomSplit(split)
           ds
 
       }
@@ -245,9 +245,6 @@ case class BroadcastMJoin(
 
 
           val newPlan = newPlan0 transformUp {
-            case join @ ShuffledHashJoin(_,_,_,_,_,_,_) =>
-              LocalLimit(10000000,join)
-
             case scan@DataSourceScan(output, rdd0, h: HadoopPfRelation, metadata) =>
               val ds = subplan.get(h.semanticHash).get
               assert(ds.semanticHash == scan.semanticHash)
