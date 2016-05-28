@@ -278,7 +278,7 @@ case class BroadcastMJoin(
         }
       }
     }
-    System.exit(0)
+//    System.exit(0)
     EnsureRequirements(this.sqlContext.conf)(findRootJoin(_bestPlan)).execute()
   }
 
