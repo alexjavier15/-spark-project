@@ -4,7 +4,7 @@ import javax.sound.sampled.FloatControl.Type
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{ExperimentalMethods, SQLContext}
-import org.apache.spark.sql.catalyst.expressions.{And, Expression, PredicateHelper}
+import org.apache.spark.sql.catalyst.expressions.{And, EquivalencesClass, Expression, PredicateHelper}
 import org.apache.spark.sql.catalyst.optimizer.{MJoinGeneralOptimizer, MJoinOrderingOptimizer, MJoinPushPredicateThroughJoin, Optimizer}
 import org.apache.spark.sql.catalyst.plans.Inner
 import org.apache.spark.sql.catalyst.plans._
@@ -175,14 +175,6 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   }
 
 
-  private def createJoinCondition(left: Seq[LogicalPlan], right: Seq[LogicalPlan]): Set[Expression] = {
-
-
-    val joinConditions = eqClasses.map(eqClass =>
-       eqClass.generateJoinImpliedEqualities(left.toSet, right.toSet)
-      ).filter(_.isDefined).map(_.get).toSet
-    joinConditions
-  }
 
   private def combinePredicates(conditions: List[Expression]): Expression = {
     conditions match {
@@ -434,7 +426,6 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       logInfo(eqClasses.toString())
       logInfo("*** othr  Conditions ***")
       logInfo(_otherConditions.toString())
-      println(_trainingSet)
       permutations
 
 
@@ -444,6 +435,16 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       Nil
     }
 
+  }
+
+
+  private def createJoinCondition(left: LogicalPlan, right: LogicalPlan): Set[Expression] = {
+
+
+    val joinConditions = eqClasses.map(eqClass =>
+      eqClass.generateJoinImpliedEqualities(left, right)
+    ).filter(_.isDefined).map(_.get).toSet
+    joinConditions
   }
 
 
@@ -463,38 +464,22 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
     // special case lists of length 1 and 2 for better performance
     case t :: Nil => List((t, Nil))
     case t :: u :: Nil =>
-      val conditions1 = createJoinCondition(Seq(t), Seq(u))
-      val conditions2 = createJoinCondition(Seq(u), Seq(t))
+      val conditions1 = createJoinCondition(t, u)
+      val conditions2 = createJoinCondition(u, t)
 
       if (conditions1.nonEmpty && conditions2.nonEmpty) {
         val join = createOrderedJoin(Seq(t, u), conditions1)
-        val semanticHash = conditions1.map(_.semanticHash()).sum
-        _trainingSet.getOrElseUpdate(semanticHash ,  join )
         List((join, conditions1.toList))
       } else
         Nil
 
     case _ =>
-      for ((y, ys) <- selections(xs); ps <- permute(ys) ;conditions = createJoinCondition(Seq(ps._1), Seq(y) ) if conditions.nonEmpty)
+      for ((y, ys) <- selections(xs); ps <- permute(ys) ;conditions = createJoinCondition(ps._1, y ) if conditions.nonEmpty)
         yield (createOrderedJoin(Seq(ps._1,y),conditions ), ps._2 ++ conditions)
 
   }
 
-  /*private def buildTrainningJoin(logical : LogicalPlan): Seq[LogicalPlan] ={
 
-    logical match {
-
-      case j @Join(l,r,t,Some(condition)) =>
-        val ls = Sample(0.0,0.1,false,System.currentTimeMillis(),l)()
-        val rs = Sample(0.0,0.1,false,System.currentTimeMillis(),r)()
-        val newJoin = Join(ls,rs,t,Some(condition))
-        val project = Project(condition.references.toSeq,newJoin)
-
-        project ::Nil
-      case _ => Nil
-    }
-
-  }*/
 
 
 

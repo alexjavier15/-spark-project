@@ -165,7 +165,7 @@ trait HashJoin {
           // find the next match
           while (currentHashMatches == null && streamIter.hasNext) {
             currentStreamedRow = streamIter.next()
-            streamedChanged=true
+            updateMetric(numStreamedMatchedRows,1)
             val key = joinKeys(currentStreamedRow)
             if (!key.anyNull) {
               currentHashMatches = hashedRelation.get(key)
@@ -186,9 +186,6 @@ trait HashJoin {
             case BuildLeft => joinRow(currentHashMatches(currentMatchPosition), currentStreamedRow)
           }
           if (boundCondition(joinRow)) {
-            if(streamedChanged)
-              updateMetric(numStreamedMatchedRows,1)
-            streamedChanged=false
             if(hashedChanged)
               updateMetric(numHashedMatchedRows,1)
             hashedChanged=false

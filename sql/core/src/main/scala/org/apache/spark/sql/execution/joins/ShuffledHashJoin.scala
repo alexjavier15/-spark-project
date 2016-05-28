@@ -62,11 +62,12 @@ case class ShuffledHashJoin(
 
 
   override def selectivity(): Double = {
+    val numStreamedMatchedRows = longMetric("numStreamedMatchedRows")
 
     if(longMetric("numOutputRows").value.value <= 0)
       Double.MinValue
     else
-      children.map(x => 1.0/x.getOutputRows).foldLeft(getOutputRows.toDouble)(_*_)
+      Seq( 1.0/right.getOutputRows , 1.0/numStreamedMatchedRows.value.value).foldLeft(getOutputRows.toDouble)(_*_)
   }
  // override def rows(): Long = children.map(_.rows()).product
 
@@ -92,6 +93,7 @@ case class ShuffledHashJoin(
 
   protected override def doExecute(): RDD[InternalRow] = {
     val numOutputRows = longMetric("numOutputRows")
+    val numStreamedMatchedRows =longMetric("numStreamedMatchedRows")
    // val numRows = longMetric(NUM_ROWS_KEY)
     val hashTableSize = statistics match {
 
@@ -109,7 +111,7 @@ case class ShuffledHashJoin(
       joinType match {
         case Inner =>
 
-          hashJoin(streamIter, hashed, numOutputRows)
+          hashJoin(streamIter, hashed, numOutputRows,Some(numStreamedMatchedRows))
 
         case LeftSemi =>
           hashSemiJoin(streamIter, hashed, numOutputRows)

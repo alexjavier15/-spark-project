@@ -366,6 +366,7 @@ def planCost() : Long = {
 
   }
   def resetChildrenMetrics : Unit = {
+    logInfo("Reseting metric for :"+nodeName )
     resetMetrics()
     children.foreach(_.resetChildrenMetrics)
 
