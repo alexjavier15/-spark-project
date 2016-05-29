@@ -293,7 +293,14 @@ case class BroadcastMJoin(
 
 
           updateSelectivities
+          rddMap.values.foreach{
+            array => {
+              array.foreach(
+                _.unpersist(false)
 
+              )
+            }
+          }
 
         }
       }
