@@ -3,16 +3,18 @@ package org.apache.spark.sql.execution
 import javax.sound.sampled.FloatControl.Type
 
 import org.apache.spark.internal.Logging
+import org.apache.spark.sql.catalyst.analysis.UnresolvedAlias
+import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, Complete, Count}
 import org.apache.spark.sql.{ExperimentalMethods, SQLContext}
-import org.apache.spark.sql.catalyst.expressions.{And, EquivalencesClass, Expression, PredicateHelper}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, EquivalencesClass, Expression, Literal, PredicateHelper}
 import org.apache.spark.sql.catalyst.optimizer.{MJoinGeneralOptimizer, MJoinOrderingOptimizer, MJoinPushPredicateThroughJoin, Optimizer}
 import org.apache.spark.sql.catalyst.plans.Inner
 import org.apache.spark.sql.catalyst.plans._
-import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan, Project, Sample}
+import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.{HolderLogicalRelation, LogicalRelation}
 import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 
-import scala.collection.mutable
+import scala.collection.mutable.{HashMap, HashSet, ListBuffer}
 import scala.reflect.ClassTag
 
 /**
@@ -48,17 +50,16 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   private var originalOrder : Option[LogicalPlan] = None
 
   val chunkedRels = findChunkedBaseRelPlans()
-  val _trainingSet = mutable.HashMap[Int,LogicalPlan]()
+  val _trainingSet = HashMap[Int,LogicalPlan]()
 
   lazy val mJoinLogical: Option[LogicalPlan] = analyzeWithMJoin(doPermutations(baseRelations))
   lazy private val (baseRelations, originalConditions): (Seq[LogicalPlan], Seq[Expression]) =
     extractJoins(originPlan,splitConjunctivePredicates).
       getOrElse((Seq(), Seq()))
 
-  lazy private val _otherConditions= mutable.Set[Expression]()
-  lazy private val eqClasses: scala.collection.mutable.Set[EquivalencesClass] = mutable.Set()
-  lazy private val accumulator: mutable.Seq[LogicalPlan] = mutable.Seq()
-  private val all_joins: mutable.Map[Int, mutable.ListBuffer[LogicalPlan]] = mutable.Map()
+  lazy private val _otherConditions= HashSet[Expression]()
+  lazy private val eqClasses = HashSet[EquivalencesClass]()
+  private val all_joins  = HashMap[Int, ListBuffer[LogicalPlan]]()
 
 
 
@@ -137,7 +138,6 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       case j@logical.Join(_, _, Inner, _) =>
         Some(flattenJoin(j,f))
       case p@logical.Project(fields, child) =>
-        accumulator :+ p
         Some(flattenJoin(child,f))
       case o@logical.Aggregate(_, _, child) =>
         Some(flattenJoin(o,f))
@@ -252,82 +252,55 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
     else {
 
 
-      // transform by remplacing LogicalRelations by  HolderLogicalRelations (Saving plannign time)
-      /*
-      * TO-DO
-      * */
-      originalOrder=None
-      println("infered plans : "+ inferedPlans.size)
+      println("infered plans : " + inferedPlans.size)
+
+      val trainingJoins = _trainingSet.values.map(
+        join =>   {
+          def appendFilter(join : LogicalPlan): LogicalPlan ={
+            val filters = _otherConditions.toSeq.filter( c => c.references.subsetOf(join.outputSet))
+            if(filters.nonEmpty){
+
+              val condition = filters .reduceLeft(And)
+              logical.Filter(condition,join)
+            }else
+              join
+
+          }
+
+          val analyzed = sqlContext.sessionState.analyzer
+          .execute(Aggregate(Seq(),Seq(Count(Literal(1)).toAggregateExpression(false)).map(UnresolvedAlias(_)),appendFilter(join)))
+          sqlContext.sessionState.optimizer.execute(analyzed)
 
 
-      /*val grouped = inferedPlans.groupBy(subplan => {
-
-        extractJoins(subplan._1, x => Seq(x)) match {
-          case  Some( (r : Seq[LogicalPlan] ,c : Seq[Expression]) ) =>
-            if(haveEquivalentOrder(baseRelations,r))
-              originalOrder=Some(subplan._1)
-            c.map(x => x.semanticHash()).sum
-          case _ => -1
         }
 
 
-      })
-
-      val  counted = grouped.map( x => x._1 -> x._2.size)
-
-     val max = counted.maxBy{
-        case (hash,count) => count
-      }
-      logInfo(counted.toString())
-
-      logInfo("filtered plans size: "+ max._2)*/
-
-
+        ).toSeq
+      logInfo(trainingJoins.toString)
 
       val analyzedJoins = inferedPlans.map(subplan => optimizeSubplan(subplan._1, subplan._2))
-      // We can gather one for all the leaves relations (we assume unique projections and
-      // filter. Plan the original plan and get the result
-     // val analyzedOriginal = optimizePlans(Seq(originPlan)).head
-      //val (leaves, filters) = extractJoins(analyzedOriginal).getOrElse((Seq(), Seq()))
-      //logInfo(chunkedRels.toString())
 
-      //Extract the first Join. To-Do : Mjoin must not have a join as child we do that to
-      // test execution of at least one plan
 
       val analyzedChunkedRelations: Seq[(LogicalPlan, Seq[LogicalPlan])] = chunkedRels.map(relations =>
-        ( optimizePlans(Seq(relations._1)).head ,optimizePlans(relations._2)))
-      //Experimental:
-      val toExecute =originPlan
-      /*originalOrder match{
-
-        case Some(p) => p
-        case None =>
-          logInfo("Not found original Order. Getting random")
-          val r = scala.util.RandomoriginPlan
-          val planId =  r.nextInt(analyzedJoins.size)
-          analyzedJoins(planId)
-      }*/
+        (optimizePlans(Seq(relations._1)).head, optimizePlans(relations._2)))
+      val toExecute = originPlan
 
 
       logInfo(toExecute.toString)
-      val optimzedOriginal =sqlContext.sessionState.optimizer.execute(toExecute)
+      val optimzedOriginal = sqlContext.sessionState.optimizer.execute(toExecute)
 
 
 
       logInfo(optimzedOriginal.toString)
 
       val rootJoin = JoinOptimizer.findRootJoin(optimzedOriginal)
-    //  val union = sqlContext.sessionState.analyzer.execute(logical.Union(chunkedOriginalJoin))
-    //  val analyzedUnion = sqlContext.sessionState.optimizer.execute(union)
-      val mJoin = logical.MJoin(rootJoin, analyzedChunkedRelations, Some(analyzedJoins.::(rootJoin)))
+
+      val mJoin = logical.MJoin(rootJoin, analyzedChunkedRelations, Some(analyzedJoins.::(rootJoin)), trainingJoins)
+
+      val res = appendPlan[logical.Join](optimzedOriginal, mJoin)
 
 
-
-      // make a copy of all plans above the root join and append the MJoin plan
-     val res =appendPlan[logical.Join](optimzedOriginal, mJoin)
-
-
-     Some(res)
+      Some(res)
 
 
 
@@ -379,6 +352,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   private def optimizeSubplan(joined: LogicalPlan, conditions: Seq[Expression]): LogicalPlan = {
 
+
     val otherFilters = _otherConditions.reduceLeftOption(And)
 
 
@@ -426,9 +400,8 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       logInfo(eqClasses.toString())
       logInfo("*** othr  Conditions ***")
       logInfo(_otherConditions.toString())
+
       permutations
-
-
 
     }
     else {
@@ -469,6 +442,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
       if (conditions1.nonEmpty && conditions2.nonEmpty) {
         val join = createOrderedJoin(Seq(t, u), conditions1)
+        _trainingSet+= join.semanticHash -> join
         List((join, conditions1.toList))
       } else
         Nil

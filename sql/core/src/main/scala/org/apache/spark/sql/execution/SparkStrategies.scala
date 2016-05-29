@@ -504,13 +504,13 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
 
   object MJoin extends Strategy {
     def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
-      case logical.MJoin(child, baseRelations, subplans) =>
+      case logical.MJoin(child, baseRelations, subplans, training) =>
         joins.BroadcastMJoin(
           planLater(child),
           baseRelations.map{ case( l@LogicalRelation(h: HadoopPfRelation, a, b), chunks) =>
              planLater(l)
               h.uniqueID -> chunks.map(planLater(_))}.toMap,
-          subplans
+          subplans,training.map(planLater(_))
 
 
         )::Nil
