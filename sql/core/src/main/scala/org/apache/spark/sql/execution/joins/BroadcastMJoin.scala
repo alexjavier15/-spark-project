@@ -141,7 +141,7 @@ case class BroadcastMJoin(
         }
 
   }
-  private def updateSelectivities(sparkPlan: SparkPlan): Unit = {
+  private def updateSelectivities(): Unit = {
 
 
 
@@ -160,8 +160,8 @@ case class BroadcastMJoin(
     logInfo("****Min  plan****")
     logInfo(bestPlan.toString())
     val oldPlan = _bestPlan
-    val _bestLogical = _subplansMap.get(bestPlan._1).get
-    found =  (bestPlan._1 != _bestPlan.semanticHash)
+    val _bestLogical = _subplansMap(bestPlan._1)
+    found =  bestPlan._1 != _bestPlan.semanticHash
       val queryExecution = new QueryExecution(sqlContext, _bestLogical)
 
 
@@ -289,27 +289,16 @@ case class BroadcastMJoin(
                 rdd.unpersist(false)
               }
           }
-          logInfo("****Selectivity Plans****")
-          logInfo(SelectivityPlan._selectivityPlanRoots.toString())
-          logInfo("****SelectivityPlan filters****")
-          logInfo(SelectivityPlan._filterStats.toString())
-          val validPlans = SelectivityPlan._selectivityPlanRoots.filter{
-            case (hc,selPlan)  =>selPlan.isValid
-            case _ => false
 
-          }
-          val bestPlan =validPlans.
-            minBy{
-              case (hc,selPlan) => selPlan.planCost()
-              case _ => Double.MaxValue
-            }
-          logInfo("****Min  plan****")
-          logInfo(bestPlan.toString())
-         // updateSelectivities(executedPlan)
-          System.exit(0)
+
+
+          updateSelectivities
+
+
         }
       }
     }
+
 //    System.exit(0)
     EnsureRequirements(this.sqlContext.conf)(findRootJoin(_bestPlan)).execute()
   }
