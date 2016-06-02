@@ -308,57 +308,50 @@ case class BroadcastMJoin(
       val columnStatPlans = JoinOptimizer.joinOptimizer.columnStatPlans.map {
         case (attribute ,plan) => {
           val physicalPlan = sqlContext.sessionState.planner.plan(plan).next()
-          println(physicalPlan)
+
           val transformedPlan =physicalPlan  transformUp {
             case scan@DataSourceScan(output, rdd0, h: HadoopPfRelation, metadata)=>
               val ds  = subplan(h.semanticHash)
               assert(ds.semanticHash == scan.semanticHash)
-                LocalLimit(10000,ds)
+                LocalLimit(100000,ds)
           }
           attribute -> transformedPlan
         }
       }
 
-      val localPredicateStatPlans = JoinOptimizer.joinOptimizer.localPredicatesStats.map {
-        case (filter ,plan) => {
-          val physicalPlan = sqlContext.sessionState.planner.plan(plan).next()
-          println(physicalPlan)
-          val transformedPlan =physicalPlan  transformUp {
-            case scan@DataSourceScan(output, rdd0, h: HadoopPfRelation, metadata)=>
-              val ds  = subplan(h.semanticHash)
-              assert(ds.semanticHash == scan.semanticHash)
-              ds
-          }
-          filter -> transformedPlan
+      def getCardinality(sparkPlan : SparkPlan) : Long ={
+
+        sparkPlan match {
+          case f @ Filter(_,_) => f.getOutputRows
+          case u : UnaryNode => getCardinality(u.child)
+          case scan @ DataSourceScan(_,_,_,_) => scan.getOutputRows
+          case _ => throw  new UnsupportedOperationException(" Could not ger cardinality")
+
         }
+
       }
 
-      val localPredicateMap = localPredicateStatPlans.map {
-        case (condition ,plan) => {
-          plan.resetChildrenMetrics
-          val  count = EnsureRequirements(this.sqlContext.conf)(plan).execute().count()
-          condition -> count
-        }
-      }
+
+
 
       val distinctsAttrMap = columnStatPlans.map {
         case (attribute ,plan) => {
           plan.resetChildrenMetrics
         val  count = EnsureRequirements(this.sqlContext.conf)(plan).execute().count()
-          attribute -> count
+          (plan ,attribute.semanticHash(), attribute) -> (count ,getCardinality(plan))
         }
       }
+      val columnsStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => h -> s }
+      val cardinalityStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => p -> c }
+      SelectivityPlan._filterStats.values.foreach{
+        f => f.computeSelctivityFromColumn(columnsStats )
+      }
+      cardinalityStats.foreach{
+        case (p,c) => SelectivityPlan._selectivityPlanNodes(p.semanticHash).setRows(c)
 
-      logInfo("****************LOCAL PREDICATES***************")
-      localPredicateStatPlans.foreach(t => t._2.printMetrics)
-      logInfo("*******************************")
-      println(localPredicateMap)
-      columnStatPlans.foreach(t => t._2.printMetrics)
-      logInfo("****************COLUMN STATS***************")
-      println(distinctsAttrMap)
+      }
 
-      found = true
-      // System.exit(0)
+     updateSelectivities()
 
     }
 
@@ -417,6 +410,18 @@ case class FilterStatInfo( filter : Expression
   override def equals(that: scala.Any): Boolean = that match {
     case f : FilterStatInfo => f.filter.semanticEquals(filter)
     case _ => false
+  }
+
+  def  computeSelctivityFromColumn( columnsStats :  Map[Int, Long] ) : Unit ={
+
+    if (children.isEmpty) {
+
+      val attrHashes = filter.references.map(_.semanticHash())
+      val colCardinalies = attrHashes.map(attr => columnsStats(attr))
+      _selectivity = 1.0 / colCardinalies.max
+
+    }else
+      children.foreach( _.computeSelctivityFromColumn(columnsStats))
   }
 
   override def hashCode(): Int = filter.semanticHash()
@@ -484,6 +489,8 @@ object SelectivityPlan {
   }
   def isValidSelectivity(sel : Double ) : Boolean = sel >= 0 && sel <= 1
   def isValidRows(rows : Long ) : Boolean = rows >= 0
+
+
 
   def updatefromExecution(sparkPlan : SparkPlan) : Unit ={
 

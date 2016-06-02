@@ -9,6 +9,7 @@ import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 import org.apache.spark.sql.execution.datasources.{HolderLogicalRelation, LogicalRelation}
 
+import scala.collection.mutable
 import scala.collection.mutable.{HashMap, HashSet, ListBuffer}
 import scala.reflect.ClassTag
 
@@ -68,34 +69,29 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
           .map(s => s.head)
       }.toSeq
 
+      val condition = _otherConditions.toSeq.
+        filter(c => c.references.subsetOf(plan.outputSet))
 
-      projectList.map { p =>
+      val newChild = condition match {
+        case Seq() => plan
+        case c  => logical.Filter(condition.reduceLeft(And), plan)
 
-        val analyzed = sqlContext.sessionState.analyzer
-          .execute(logical.Distinct(logical.Project(Seq(p),plan)))
+      }
 
-        p -> sqlContext.sessionState.optimizer.execute(analyzed)
+        projectList.map { p =>
+
+          val analyzed = sqlContext.sessionState.analyzer
+            .execute(logical.Distinct(logical.Project(Seq(p), newChild)))
+
+          p -> sqlContext.sessionState.optimizer.execute(analyzed)
+
+
       }
 
     }
 
   ).toMap
 
-  lazy val localPredicatesStats = baseRelations.flatMap {
-    plan => {
-      val filter = _otherConditions.toSeq.
-        filter(c => c.references.subsetOf(plan.outputSet))
-      if (filter.nonEmpty) {
-        Seq(filter.reduceLeft(And)).
-          map(f => f -> logical.Project(f.references.toSeq, logical.Filter(f, plan))).
-          map { case (f, p) => f -> logical.Distinct(p) }
-      }
-      else Seq()
-    }
-  }.map { case (f , d ) =>
-    val analyzed = sqlContext.sessionState.analyzer.execute(d)
-    f -> sqlContext.sessionState.optimizer.execute(analyzed)
-  }.toMap
 
 
   def getEquivalenceClasses = eqClasses
