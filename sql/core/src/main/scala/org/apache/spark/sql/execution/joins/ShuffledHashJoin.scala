@@ -44,7 +44,6 @@ case class ShuffledHashJoin(
     "numStreamedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of streamed matched rows"),
      NUM_PARTITIONS_KEY ->SQLMetrics.createLongMetric(sparkContext, "number of partitions"),
     "numHashedMatchedRows" -> SQLMetrics.createLongMetric(sparkContext, "number of hashed matched rows")
-    //NUM_ROWS_KEY-> SQLMetrics.createLongMetric(sparkContext, "number of rows")
   )
 
   override def outputPartitioning: Partitioning = joinType match {

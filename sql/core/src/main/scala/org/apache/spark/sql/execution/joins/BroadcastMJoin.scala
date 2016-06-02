@@ -39,8 +39,7 @@ import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 case class BroadcastMJoin(
                            child: SparkPlan,
                            @transient baseRelations: Map[Int,Seq[SparkPlan]],
-                           @transient subplans: Option[Seq[logical.LogicalPlan]],
-                           @transient training : Seq[SparkPlan]
+                           @transient subplans: Option[Seq[logical.LogicalPlan]]
                          )
   extends UnaryNode {
 
@@ -52,7 +51,9 @@ case class BroadcastMJoin(
   private var _samplingFactor : Option[Long] = None
   private var _pendingSubplans  =initSubplans()
   private var _lastCost = 0.0
-  private val split = Array.fill(10)(0.1)
+  private val samplingFactor = 0.1
+  private val bucketSize =  8.0 * 1024*1024
+  private val split = Array.fill(10)(samplingFactor)
   // Keeps track of all persisted RDDs
   private val _subplansMap = subplans.getOrElse(Nil).groupBy{
     subplan => subplan.simpleHash}.map{ case (a,b)=> a -> b.head }
@@ -201,7 +202,171 @@ case class BroadcastMJoin(
 
   }
 
+  def optimizeJoinOrderFromJoinExecution(): Unit ={
+
+
+    /*val subplan = _pendingSubplans.next().map { plan => plan.semanticHash -> plan }.toMap
+    val start = System.currentTimeMillis()
+    val rddIds = Array.fill(baseRelations.size)(0 until 10).toList
+    val rddMap = HashMap[Int, Array[RDD[InternalRow]]]()
+    val relationIndex = baseRelations.keySet.toSeq
+
+    val rddPermutations0 = combine[Int](rddIds)
+    val rddPermutations = rddPermutations0.toIterator
+
+    val  trainingPlans = training.map {
+      plan => {
+        plan transformUp {
+
+          case join : HashJoin =>
+            LocalLimit(100000,join)
+
+          case scan@DataSourceScan(_, rdd0, h: HadoopPfRelation, _) =>
+            val ds = subplan.get(h.semanticHash).get
+            assert(ds.semanticHash == scan.semanticHash)
+            rddMap += ds.semanticHash -> ds.execute().randomSplit(split)
+            ds
+
+        }
+
+
+      }
+
+    }
+
+      logInfo("EXECUTING:")
+
+      logInfo(subplan.toString())
+      logInfo("BEFORE TRANSFORMATION:")
+      logInfo(_bestPlan.toString)
+
+
+      while (rddPermutations.hasNext && !found) {
+        val partitionSeq = (relationIndex zip rddPermutations.next()).toMap
+
+        trainingPlans.foreach {
+          join => {
+
+            val newPlan = join transformUp {
+              /*  case join @ShuffledHashJoin(
+                leftKeys, rightKeys, Inner, buildSide, condition, left, right)=>
+                  BroadcastHashJoin(
+                    leftKeys, rightKeys, Inner, BuildRight, condition, left, right)*/
+
+              case scan@DataSourceScan(output, rdd0, h: HadoopPfRelation, metadata) =>
+                val ds = subplan.get(h.semanticHash).get
+                assert(ds.semanticHash == scan.semanticHash)
+                val newRDD = rddMap(h.semanticHash)(partitionSeq(h.semanticHash))
+                DataSourceScan(output, newRDD, h, metadata)
+
+            }
+
+
+            logInfo("AFTER TRANSFORMATION:")
+
+            logInfo(newPlan.toString)
+            newPlan.resetChildrenMetrics
+            newPlan.printMetrics
+            val executedPlan = EnsureRequirements(this.sqlContext.conf)(newPlan)
+            val rdd = executedPlan.execute()
+            rdd.count
+
+
+            executedPlan.printMetrics
+
+            logInfo("Cost :" + executedPlan.planCost)
+            SelectivityPlan.updatefromExecution(executedPlan)
+            //updateStatisticsTo(_bestPlan)
+            rdd.unpersist(false)
+          }
+        }
+
+
+
+        updateSelectivities
+        rddMap.values.foreach{
+          array => {
+            array.foreach(
+              _.unpersist(false)
+
+            )
+          }
+        }
+
+      }
+
+*/
+  }
+
+  def optimizeJoinOrderFromELS(): Unit ={
+    sparkContext.withScope {
+
+      val seed = System.currentTimeMillis()
+      val currSubplan = _pendingSubplans.next()
+      val subplan = currSubplan.map { plan => plan.semanticHash -> plan }.toMap
+
+      val columnStatPlans = JoinOptimizer.joinOptimizer.columnStatPlans.map {
+        case (attribute ,plan) => {
+          val physicalPlan = sqlContext.sessionState.planner.plan(plan).next()
+          println(physicalPlan)
+          val transformedPlan =physicalPlan  transformUp {
+            case scan@DataSourceScan(output, rdd0, h: HadoopPfRelation, metadata)=>
+              val ds  = subplan(h.semanticHash)
+              assert(ds.semanticHash == scan.semanticHash)
+                LocalLimit(10000,ds)
+          }
+          attribute -> transformedPlan
+        }
+      }
+
+      val localPredicateStatPlans = JoinOptimizer.joinOptimizer.localPredicatesStats.map {
+        case (filter ,plan) => {
+          val physicalPlan = sqlContext.sessionState.planner.plan(plan).next()
+          println(physicalPlan)
+          val transformedPlan =physicalPlan  transformUp {
+            case scan@DataSourceScan(output, rdd0, h: HadoopPfRelation, metadata)=>
+              val ds  = subplan(h.semanticHash)
+              assert(ds.semanticHash == scan.semanticHash)
+              ds
+          }
+          filter -> transformedPlan
+        }
+      }
+
+      val localPredicateMap = localPredicateStatPlans.map {
+        case (condition ,plan) => {
+          plan.resetChildrenMetrics
+          val  count = EnsureRequirements(this.sqlContext.conf)(plan).execute().count()
+          condition -> count
+        }
+      }
+
+      val distinctsAttrMap = columnStatPlans.map {
+        case (attribute ,plan) => {
+          plan.resetChildrenMetrics
+        val  count = EnsureRequirements(this.sqlContext.conf)(plan).execute().count()
+          attribute -> count
+        }
+      }
+
+      logInfo("****************LOCAL PREDICATES***************")
+      localPredicateStatPlans.foreach(t => t._2.printMetrics)
+      logInfo("*******************************")
+      println(localPredicateMap)
+      columnStatPlans.foreach(t => t._2.printMetrics)
+      logInfo("****************COLUMN STATS***************")
+      println(distinctsAttrMap)
+
+      found = true
+      // System.exit(0)
+
+    }
+
+
+  }
+
   override protected def doExecute(): RDD[InternalRow] = {
+
 
     val rddBuffer = ArrayBuffer[RDD[InternalRow]]()
     sqlContext.setConf("spark.sql.mjoin", "false")
@@ -209,104 +374,11 @@ case class BroadcastMJoin(
     var duration: Long = 0L
     var tested = false
     var passes = 0
-    while (_pendingSubplans.hasNext) {
-
-      val subplan = _pendingSubplans.next().map { plan => plan.semanticHash -> plan }.toMap
-      val start = System.currentTimeMillis()
-      val rddIds = Array.fill(baseRelations.size)(0 until 10).toList
-      val rddMap = HashMap[Int, Array[RDD[InternalRow]]]()
-      val relationIndex = baseRelations.keySet.toSeq
-
-      val rddPermutations0 = combine[Int](rddIds)
-      val rddPermutations = rddPermutations0.toIterator
-
-
-      passes += 1
-
-
-       val  trainingPlans = training.map {
-         plan => {
-           plan transformUp {
-
-             case join : HashJoin =>
-               LocalLimit(100000,join)
-
-             case scan@DataSourceScan(_, rdd0, h: HadoopPfRelation, _) =>
-               val ds = subplan.get(h.semanticHash).get
-               assert(ds.semanticHash == scan.semanticHash)
-               rddMap += ds.semanticHash -> ds.execute().randomSplit(split)
-               ds
-
-           }
-
-
-         }
-
-       }
-
-
-
-
-      if (!tested) {
-        logInfo("EXECUTING:")
-
-        logInfo(subplan.toString())
-        logInfo("BEFORE TRANSFORMATION:")
-        logInfo(_bestPlan.toString)
-
-
-        while (rddPermutations.hasNext && !found) {
-          val partitionSeq = (relationIndex zip rddPermutations.next()).toMap
-
-          trainingPlans.foreach {
-              join => {
-
-                val newPlan = join transformUp {
-                  case scan@DataSourceScan(output, rdd0, h: HadoopPfRelation, metadata) =>
-                    val ds = subplan.get(h.semanticHash).get
-                    assert(ds.semanticHash == scan.semanticHash)
-                    val newRDD = rddMap(h.semanticHash)(partitionSeq(h.semanticHash))
-                    DataSourceScan(output, newRDD, h, metadata)
-
-                }
-
-
-                logInfo("AFTER TRANSFORMATION:")
-
-                logInfo(newPlan.toString)
-                newPlan.resetChildrenMetrics
-                newPlan.printMetrics
-                val executedPlan = EnsureRequirements(this.sqlContext.conf)(newPlan)
-                val rdd = executedPlan.execute()
-                rdd.count
-
-
-                executedPlan.printMetrics
-                tested = true
-                logInfo("Cost :" + executedPlan.planCost)
-                SelectivityPlan.updatefromExecution(executedPlan)
-                //updateStatisticsTo(_bestPlan)
-                rdd.unpersist(false)
-              }
-          }
-
-
-
-          updateSelectivities
-          rddMap.values.foreach{
-            array => {
-              array.foreach(
-                _.unpersist(false)
-
-              )
-            }
-          }
-
-        }
-      }
+    while (_pendingSubplans.hasNext && !found) {
+      //optimizeJoinOrderFromJoinExecution
+      optimizeJoinOrderFromELS()
     }
 
-//    System.exit(0)
     EnsureRequirements(this.sqlContext.conf)(findRootJoin(_bestPlan)).execute()
   }
 
@@ -340,9 +412,6 @@ case class FilterStatInfo( filter : Expression
     }
 
   }
-
-
-
 
 
   override def equals(that: scala.Any): Boolean = that match {

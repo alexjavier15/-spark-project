@@ -41,11 +41,13 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
     options) with Serializable{
 
   var uniqueID : Int = pFileDesc.hashCode()
+
   def hasParent : Boolean = parent!=null
     println("Initiating HaddopPfRelation  ")
     pFLocation.allFiles().foreach(f=>{
       import sys.process._
-      "xattr -l "+ f.getPath.toString.substring(5) !})
+      "xattr -l "+ f.getPath.toString.substring(5) !
+      })
 
 
   def isChild(relation : HadoopPfRelation): Boolean = hasParent && parent == relation

@@ -21,6 +21,10 @@ class EquivalencesClass extends Logging{
   @transient var mergedLink: EquivalencesClass = null
 
 
+
+  def classSelectivity = conditions.values.maxBy(e => e.selectivity)
+
+
   /**
     * Alex: Add a join condition to this EquivalenceClass.
      * */

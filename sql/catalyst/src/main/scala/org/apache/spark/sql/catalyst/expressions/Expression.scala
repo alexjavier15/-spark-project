@@ -65,6 +65,7 @@ abstract class Expression extends TreeNode[Expression] {
   def foldable: Boolean = false
 
   var equivalencesClass  : Option[EquivalencesClass] = None
+  var selectivity : Double  = Double.MinValue
 
   /**
    * Returns true when the current expression always return the same result for fixed inputs from

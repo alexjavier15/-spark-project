@@ -400,4 +400,24 @@ case class BroadcastHashJoin(
        """.stripMargin
     }
   }
+
+  override def selectivity(): Double = {
+    val numStreamedMatchedRows = longMetric("numStreamedMatchedRows")
+
+    if(longMetric("numOutputRows").value.value <= 0)
+      Double.MinValue
+    else
+      Seq( 1.0/right.getOutputRows , 1.0/numStreamedMatchedRows.value.value).foldLeft(getOutputRows.toDouble)(_*_)
+  }
+  // override def rows(): Long = children.map(_.rows()).product
+
+  override def simpleHash: Int = {
+    var h = 17
+    h = h * 37 + left.simpleHash
+    h = h * 37 + right.simpleHash
+    h = h * 37 +  Some((leftKeys zip rightKeys).map { case (l, r) => EqualTo(l, r) }.
+      reduceLeft(And)).map(_.semanticHash()).sum
+    h
+  }
+
 }
