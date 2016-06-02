@@ -341,7 +341,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
     res
   }
 
-  private def buildJoinAlternatives() = inferedPlans.map { case (plan, conditions) => findRootJoin(optimizeSubplan(plan, conditions)) }
+  private def buildJoinAlternatives() = inferedPlans.map { case (plan, conditions) => optimizeSubplan(plan, conditions) }
 
   private def buildColumnStatPlans() = {
 

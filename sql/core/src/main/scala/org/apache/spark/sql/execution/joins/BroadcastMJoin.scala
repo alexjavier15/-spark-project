@@ -349,7 +349,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
     }
     val executedPlan = sqlContext.sessionState.prepareForExecution.execute(_bestPlan)
     println(executedPlan)
-    executedPlan.execute()
+    findRootJoin(executedPlan).execute()
   }
 
 
