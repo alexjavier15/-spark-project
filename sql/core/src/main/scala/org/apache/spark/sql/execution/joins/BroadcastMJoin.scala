@@ -21,11 +21,13 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans._
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.trees.TreeNode
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.datasources.LogicalRelation
 import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 import org.apache.spark.sql.execution.exchange.EnsureRequirements
+import org.apache.spark.sql.types.IntegerType
 
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
@@ -36,12 +38,7 @@ import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
   * broadcasted relation.  This data is then placed in a Spark broadcast variable.  The streamed
   * relation is not shuffled.
   */
-case class BroadcastMJoin(
-                           child: SparkPlan,
-                           @transient baseRelations: Map[Int,Seq[SparkPlan]],
-                           @transient subplans: Option[Seq[logical.LogicalPlan]]
-                         )
-  extends UnaryNode {
+case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
   private var currentSubplans: Seq[Seq[Int]] = Seq(Seq())
   var key = -1
@@ -54,14 +51,9 @@ case class BroadcastMJoin(
   private val samplingFactor = 0.1
   private val bucketSize =  8.0 * 1024*1024
   private val split = Array.fill(10)(samplingFactor)
-  // Keeps track of all persisted RDDs
-  private val _subplansMap = subplans.getOrElse(Nil).groupBy{
+  private val _subplansMap = JoinOptimizer.joinOptimizer.joinAlternatives.groupBy{
     subplan => subplan.simpleHash}.map{ case (a,b)=> a -> b.head }
-  //private[this] val persistentHashTables = {
-  //  val map: ConcurrentMap[Int, broadcast.Broadcast[HashedRelation]] = new MapMaker().
-    //  weakValues().makeMap[Int, broadcast.Broadcast[HashedRelation]]()
-    //7map.asScala
-  //}
+
 
 
   private def combine[A]( chunks: List[Seq[A]]): Seq[Seq[A]] = {
@@ -77,9 +69,9 @@ case class BroadcastMJoin(
     }
   }
 
-  private[this] def initSubplans():Iterator[Seq[SparkPlan]] ={
+  private[this] def initSubplans():Iterator[Seq[LogicalPlan]] ={
 /** For each element x in List xss, returns (x, xss - x)   **/
-    val res = combine[SparkPlan](baseRelations.values.toList)
+    val res = combine[LogicalPlan]( JoinOptimizer.joinOptimizer.chunkedRels.values.toList)
     res.toIterator
 
   }
@@ -98,25 +90,20 @@ case class BroadcastMJoin(
   */
   override protected def doPrepare(): Unit = {
 
-    //logInfo(child.toString)
-    //System.exit(0)
-
-    subplans.getOrElse(Seq()).foreach( plan => {
+    JoinOptimizer.joinOptimizer.joinAlternatives.foreach{ plan =>
         val selPlan = SelectivityPlan(plan)
        SelectivityPlan._selectivityPlanRoots+=(plan.simpleHash->selPlan)
+    }
 
-      }
-
-      )
-    logInfo(_pendingSubplans.toString())
-    logInfo("****Subplans****")
-    logInfo(subplans.toString)
-    logInfo("****Selectivity Plans****")
-    logInfo(SelectivityPlan._selectivityPlanRoots.toString())
-    logInfo("****SelectivityPlan nodes****")
-    logInfo(SelectivityPlan._selectivityPlanNodes.toString())
-    logInfo("****SelectivityPlan filters****")
-    logInfo(SelectivityPlan._filterStats.toString())
+    logDebug(_pendingSubplans.toString())
+    logDebug("****Subplans****")
+    logDebug(JoinOptimizer.joinOptimizer.joinAlternatives.toString)
+    logDebug("****Selectivity Plans****")
+    logDebug(SelectivityPlan._selectivityPlanRoots.toString())
+    logDebug("****SelectivityPlan nodes****")
+    logDebug(SelectivityPlan._selectivityPlanNodes.toString())
+    logDebug("****SelectivityPlan filters****")
+    logDebug(SelectivityPlan._filterStats.toString())
 
   }
 
@@ -146,8 +133,8 @@ case class BroadcastMJoin(
 
 
 
-    logInfo("****Selectivity Plans****")
-    logInfo(SelectivityPlan._selectivityPlanRoots.toString())
+    logDebug("****Selectivity Plans****")
+    logDebug(SelectivityPlan._selectivityPlanRoots.toString())
     val validPlans = SelectivityPlan._selectivityPlanRoots.filter{
       case (hc,selPlan)  =>selPlan.isValid
       case _ => false
@@ -163,32 +150,18 @@ case class BroadcastMJoin(
     val oldPlan = _bestPlan
     val _bestLogical = _subplansMap(bestPlan._1)
     found =  bestPlan._1 != _bestPlan.semanticHash
-      val queryExecution = new QueryExecution(sqlContext, _bestLogical)
 
+    val queryExecution = new QueryExecution(sqlContext, _bestLogical)
 
-
-      _bestPlan = queryExecution.sqlContext.sessionState.planner.
-        plan(queryExecution.sqlContext.sessionState.optimizer.execute(_bestLogical)).next
-      logInfo("****New Optimized plan****")
-      logInfo(_bestPlan.toString())
-      logInfo("****SelectivityPlan filters****")
-      logInfo(SelectivityPlan._filterStats.toString())
-
-
+    _bestPlan = queryExecution.sqlContext.sessionState.planner.
+      plan(queryExecution.sqlContext.sessionState.optimizer.execute(_bestLogical)).next
+    logInfo("****New Optimized plan****")
+    logInfo(_bestPlan.toString())
+    logDebug("****SelectivityPlan filters****")
+    logDebug(SelectivityPlan._filterStats.toString())
   }
 
-  private[this] def getPartition0RDD(plan: SparkPlan): SparkPlan = {
 
-    val seed : Long = System.currentTimeMillis()
-
-    plan match {
-      case f @ Filter(_,child) => plan
-      /*case scan@DataSourceScan(o, rdd, rel, metadata) =>
-        val withReplace = false
-        DataSourceScan(o, rdd.sample(withReplace,0.2,seed), rel, metadata)*/
-      case _ => plan
-    }
-  }
 
 
   def findRootJoin(plan: SparkPlan): SparkPlan = {
@@ -307,14 +280,17 @@ case class BroadcastMJoin(
 
       val columnStatPlans = JoinOptimizer.joinOptimizer.columnStatPlans.map {
         case (attribute ,plan) => {
-          val physicalPlan = sqlContext.sessionState.planner.plan(plan).next()
 
-          val transformedPlan =physicalPlan  transformUp {
-            case scan@DataSourceScan(output, rdd0, h: HadoopPfRelation, metadata)=>
+          val transformedPlan = sqlContext.sessionState.planner.plan(
+            plan  transformUp {
+            case relation  @ LogicalRelation(h: HadoopPfRelation, _, _)=>
               val ds  = subplan(h.semanticHash)
-              assert(ds.semanticHash == scan.semanticHash)
-                LocalLimit(100000,ds)
-          }
+              assert(ds.semanticHash == relation.semanticHash)
+                logical.LocalLimit(Literal(100000),ds)
+
+
+          } ).next()
+
           attribute -> transformedPlan
         }
       }

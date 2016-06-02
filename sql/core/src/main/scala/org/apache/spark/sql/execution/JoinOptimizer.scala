@@ -2,14 +2,13 @@ package org.apache.spark.sql.execution
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SQLContext
-import org.apache.spark.sql.catalyst.expressions.{And, EquivalencesClass, Expression, PredicateHelper}
+import org.apache.spark.sql.catalyst.expressions.{And, EquivalencesClass, Expression, NamedExpression, PredicateHelper}
 import org.apache.spark.sql.catalyst.optimizer.MJoinGeneralOptimizer
-import org.apache.spark.sql.catalyst.plans.{Inner, _}
 import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.catalyst.plans.{Inner, logical}
 import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 import org.apache.spark.sql.execution.datasources.{HolderLogicalRelation, LogicalRelation}
 
-import scala.collection.mutable
 import scala.collection.mutable.{HashMap, HashSet, ListBuffer}
 import scala.reflect.ClassTag
 
@@ -17,125 +16,60 @@ import scala.reflect.ClassTag
   * Created by alex on 21.03.16.
   */
 
-object JoinOptimizer{
+object JoinOptimizer {
   val gOptimizer = new MJoinGeneralOptimizer
-  var joinOptimizer : JoinOptimizer = null
+  var joinOptimizer: JoinOptimizer = null
 
-  def apply(originPlan: LogicalPlan, sqlContext: SQLContext) : JoinOptimizer ={
-    if(joinOptimizer==null || joinOptimizer.originPlan!=originPlan)
-      joinOptimizer =new JoinOptimizer(gOptimizer.execute(originPlan),sqlContext)
+  def apply(originPlan: LogicalPlan, sqlContext: SQLContext): JoinOptimizer = {
+    if (joinOptimizer == null || joinOptimizer.originPlan != originPlan)
+      joinOptimizer = new JoinOptimizer(gOptimizer.execute(originPlan), sqlContext)
     joinOptimizer
   }
 
-  def DummyCountDistinct : SparkPlan = {
+  def DummyCountDistinct: SparkPlan = {
 
     null
   }
 
-  def findRootJoin(plan: LogicalPlan): LogicalPlan = {
 
-    plan match {
-
-      case j@Join(_, _, _, _) => j
-      case node: logical.UnaryNode => findRootJoin(node.child)
-      case _ => throw new IllegalArgumentException("Only UnaryNode must be above a Join")
-    }
-
-  }
 
 }
 
-class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLContext) extends PredicateHelper with Logging{
-  private var originalOrder : Option[LogicalPlan] = None
-
-  val chunkedRels = findChunkedBaseRelPlans()
-  val _trainingSet = HashMap[Int,LogicalPlan]()
-
-  lazy val mJoinLogical: Option[LogicalPlan] = analyzeWithMJoin(doPermutations(baseRelations))
+class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLContext) extends PredicateHelper with Logging {
+  lazy val mJoinLogical: Option[LogicalPlan] = analyzeWithMJoin()
+  lazy val columnStatPlans = buildColumnStatPlans()
+  lazy val joinAlternatives = buildJoinAlternatives()
   lazy private val (baseRelations, originalConditions): (Seq[LogicalPlan], Seq[Expression]) =
-    extractJoins(originPlan,splitConjunctivePredicates).
+    extractJoins(splitConjunctivePredicates).
       getOrElse((Seq(), Seq()))
-
-  lazy private val _otherConditions= HashSet[Expression]()
+  lazy private val _otherConditions = HashSet[Expression]()
   lazy private val eqClasses = HashSet[EquivalencesClass]()
-  private val all_joins  = HashMap[Int, ListBuffer[LogicalPlan]]()
+  val chunkedRels = findChunkedBaseRelPlans()
+  val inferedPlans = doPermutations()
+  private val all_joins = HashMap[Int, ListBuffer[LogicalPlan]]()
+  private var originalOrder: Option[LogicalPlan] = None
 
-  lazy val columnStatPlans = baseRelations.flatMap(
-    plan =>   {
-      val projectList = eqClasses.flatMap {
-        eqc => eqc.members
-          .map(m => m.outputSet.references)
-          .filter(r => r.subsetOf(plan.outputSet))
-          .map(s => s.head)
-      }.toSeq
+  /** Returns a list containing all permutations of the input list */
+  private def permute(xs: List[LogicalPlan]): List[(LogicalPlan,
+    List[Expression])] = xs match {
+    case Nil => Nil
 
-      val condition = _otherConditions.toSeq.
-        filter(c => c.references.subsetOf(plan.outputSet))
+    // special case lists of length 1 and 2 for better performance
+    case t :: Nil => List((t, Nil))
+    case t :: u :: Nil =>
+      val conditions1 = createJoinCondition(t, u)
+      val conditions2 = createJoinCondition(u, t)
 
-      val newChild = condition match {
-        case Seq() => plan
-        case c  => logical.Filter(condition.reduceLeft(And), plan)
+      if (conditions1.nonEmpty && conditions2.nonEmpty) {
+        val join = createOrderedJoin(Seq(t, u), conditions1)
+        List((join, conditions1.toList))
+      } else
+        Nil
 
-      }
+    case _ =>
+      for ((y, ys) <- selections(xs); ps <- permute(ys); conditions = createJoinCondition(ps._1, y) if conditions.nonEmpty)
+        yield (createOrderedJoin(Seq(ps._1, y), conditions), ps._2 ++ conditions)
 
-        projectList.map { p =>
-
-          val analyzed = sqlContext.sessionState.analyzer
-            .execute(logical.Distinct(logical.Project(Seq(p), newChild)))
-
-          p -> sqlContext.sessionState.optimizer.execute(analyzed)
-
-
-      }
-
-    }
-
-  ).toMap
-
-
-
-  def getEquivalenceClasses = eqClasses
-
-  private def findChunkedBaseRelPlans(): Seq[(LogicalPlan, Seq[LogicalPlan])] = {
-    if(!sqlContext.conf.mJoinEnabled)
-      Seq.empty
-
-    //  Map every baseRealtion with its HadoopPfRelation
-    val sources = baseRelations.map {
-      case relation @LogicalRelation(h: HadoopPfRelation, _, _) =>
-        (relation, Some(h))
-      case relation => (relation, None)
-    }
-
-
-
-    // fore very  HadoopPfRelation found build relation for every chunk
-
- sources.map(plan => (plan._1, splitRelation(plan._1, plan._2)))
-
-
-  }
-
-  private def splitRelation(plan: LogicalPlan, relation: Option[HadoopPfRelation]): Seq[LogicalPlan] = {
-
-
-    val res = relation match {
-      case None => Seq(plan)
-      case Some(h) =>
-        val splittedHPFRelation = h.splitHadoopPfRelation()
-
-        splittedHPFRelation.map(newRel => {
-          plan transform {
-            case l@LogicalRelation(h: HadoopPfRelation, a, b) =>
-
-              LogicalRelation(newRel, Some(l.output), b)
-          }
-        }
-        )
-    }
-
-    assert(res.forall(r => r.semanticHash == plan.semanticHash))
-    res
   }
 
   /**
@@ -143,45 +77,44 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
     * conditions
     *
     */
-  private def extractJoins(plan: LogicalPlan , f : Expression => Seq[Expression]): Option[(Seq[LogicalPlan], Seq[Expression])] = {
-    if(!sqlContext.conf.mJoinEnabled )
+  private def extractJoins(f: Expression => Seq[Expression]): Option[(Seq[LogicalPlan], Seq[Expression])] = {
+    if (!sqlContext.conf.mJoinEnabled)
       Seq.empty
 
     // flatten all inner joins, which are next to each other
-    def flattenJoin(plan: LogicalPlan,f : Expression => Seq[Expression]): (Seq[LogicalPlan], Seq[Expression]) = plan match {
+    def flattenJoin(plan: LogicalPlan, f: Expression => Seq[Expression]): (Seq[LogicalPlan], Seq[Expression]) = plan match {
       case logical.Join(left, right, Inner, cond) =>
-        val (plans, conditions) = flattenJoin(left,f)
+        val (plans, conditions) = flattenJoin(left, f)
         (plans ++ Seq(right), conditions ++ cond.toSeq)
 
       case logical.Filter(filterCondition, j@Join(left, right, Inner, joinCondition)) =>
-        val (plans, conditions) = flattenJoin(j,f)
+        val (plans, conditions) = flattenJoin(j, f)
         (plans, conditions ++ f(filterCondition))
-      case logical.Project(fields, child) => flattenJoin(child,f)
+      case logical.Project(fields, child) => flattenJoin(child, f)
       case logical.Aggregate(a, b, child) =>
-        flattenJoin(child,f)
-      case logical.GlobalLimit(_, child) => flattenJoin(child,f)
-      case logical.LocalLimit(_, child) => flattenJoin(child,f)
-      case logical.Sort(_,_,child)=>flattenJoin(child,f)
+        flattenJoin(child, f)
+      case logical.GlobalLimit(_, child) => flattenJoin(child, f)
+      case logical.LocalLimit(_, child) => flattenJoin(child, f)
+      case logical.Sort(_, _, child) => flattenJoin(child, f)
       case _ => (Seq(plan), Seq())
     }
 
-    plan match {
-      case fil @logical.Filter(filterCondition, j@Join(_, _, Inner, _)) =>
-        Some(flattenJoin(fil,f))
+    originPlan match {
+      case fil@logical.Filter(filterCondition, j@Join(_, _, Inner, _)) =>
+        Some(flattenJoin(fil, f))
       case j@logical.Join(_, _, Inner, _) =>
-        Some(flattenJoin(j,f))
+        Some(flattenJoin(j, f))
       case p@logical.Project(fields, child) =>
-        Some(flattenJoin(child,f))
+        Some(flattenJoin(child, f))
       case o@logical.Aggregate(_, _, child) =>
-        Some(flattenJoin(o,f))
-      case l1@logical.GlobalLimit(_, child) => Some(flattenJoin(l1,f))
-      case l2@logical.LocalLimit(_, child) => Some(flattenJoin(l2,f))
+        Some(flattenJoin(o, f))
+      case l1@logical.GlobalLimit(_, child) => Some(flattenJoin(l1, f))
+      case l2@logical.LocalLimit(_, child) => Some(flattenJoin(l2, f))
       case _ => None
     }
 
 
   }
-
 
   private def addEquivMembers(condition: Expression): Unit = {
 
@@ -189,25 +122,23 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
     eqClassNew.addEquivalence(condition)
     //not a join condition
-    if( eqClassNew.members.isEmpty){
-      _otherConditions+=condition
-    }else{
+    if (eqClassNew.members.isEmpty) {
+      _otherConditions += condition
+    } else {
 
-      logDebug("Adding  new equivalence classes for :"+condition.toString)
-      val mergedClasses =eqClasses.foldLeft(eqClassNew)(_.mergeWith(_))
-      logDebug("Merged  result :"+mergedClasses.toString)
+      logDebug("Adding  new equivalence classes for :" + condition.toString)
+      val mergedClasses = eqClasses.foldLeft(eqClassNew)(_.mergeWith(_))
+      logDebug("Merged  result :" + mergedClasses.toString)
 
       eqClasses.filter(_.canMergeWith(mergedClasses)).foreach {
         eqclass =>
-        logDebug("Deleting   equivalence classes  :"+eqclass.toString +" merged with "+ mergedClasses.toString)
-        eqClasses -= eqclass
+          logDebug("Deleting   equivalence classes  :" + eqclass.toString + " merged with " + mergedClasses.toString)
+          eqClasses -= eqclass
       }
 
-      eqClasses+=mergedClasses
+      eqClasses += mergedClasses
     }
   }
-
-
 
   private def combinePredicates(conditions: List[Expression]): Expression = {
     conditions match {
@@ -244,95 +175,54 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   }
 
+  private def withHolders(logicalPlan: LogicalPlan): LogicalPlan = {
 
-  private def withHolders(logicalPlan: LogicalPlan): LogicalPlan ={
+    logicalPlan transformUp {
 
-   logicalPlan transformUp {
+      case l@LogicalRelation(h: HadoopPfRelation, a, b) =>
 
-       case l @ LogicalRelation(h: HadoopPfRelation, a, b) =>
-
-         HolderLogicalRelation(l,h);
+        HolderLogicalRelation(l, h);
 
 
-   }
+    }
 
   }
 
-
-
-  private def haveEquivalentOrder(plan1 :Seq[LogicalPlan],plan2 :Seq[LogicalPlan] ): Boolean ={
-    assert(plan1.size== plan2.size  )
-    if(plan1.size == 2)
+  private def haveEquivalentOrder(plan1: Seq[LogicalPlan], plan2: Seq[LogicalPlan]): Boolean = {
+    assert(plan1.size == plan2.size)
+    if (plan1.size == 2)
       true
-    else{
-      val testSize = plan1.size -2
-      (plan1.take(testSize) zip plan2.take(testSize)).forall{
+    else {
+      val testSize = plan1.size - 2
+      (plan1.take(testSize) zip plan2.take(testSize)).forall {
 
-        case (a,b) => a.semanticHash == b.semanticHash
+        case (a, b) => a.semanticHash == b.semanticHash
       }
 
     }
   }
-  private def analyzeWithMJoin(inferedPlans: List[(LogicalPlan,
-    List[Expression])]): Option[LogicalPlan] = {
 
-    if(!sqlContext.conf.mJoinEnabled )
-      List.empty
+  private def analyzeWithMJoin(): Option[LogicalPlan] = {
 
-    if (inferedPlans == Nil) {
+    if (!sqlContext.conf.mJoinEnabled || inferedPlans == Nil)
       None
-    }
     else {
-
-
-      println("infered plans : " + inferedPlans.size)
-
-
-
-      val analyzedJoins = inferedPlans.map(subplan => optimizeSubplan(subplan._1, subplan._2))
-
-
-      val analyzedChunkedRelations: Seq[(LogicalPlan, Seq[LogicalPlan])] = chunkedRels.map(relations =>
-        (optimizePlans(Seq(relations._1)).head, optimizePlans(relations._2)))
-      val toExecute = originPlan
-
-
-      logInfo(toExecute.toString)
-      val optimzedOriginal = sqlContext.sessionState.optimizer.execute(toExecute)
-
-
-
-      logInfo(optimzedOriginal.toString)
-
-      val rootJoin = JoinOptimizer.findRootJoin(optimzedOriginal)
-
-      val mJoin = logical.MJoin(rootJoin, analyzedChunkedRelations, Some(analyzedJoins.::(rootJoin)))
-
+      val optimzedOriginal = sqlContext.sessionState.optimizer.execute(originPlan)
+      val rootJoin = findRootJoin(optimzedOriginal)
+      val mJoin = logical.MJoin(rootJoin)
       val res = appendPlan[logical.Join](optimzedOriginal, mJoin)
-
-
       Some(res)
-
-
-
-
     }
-
   }
 
-  private def optimizePlans( plans : Seq[LogicalPlan]): Seq[LogicalPlan] ={
+  private def optimizePlans(plans: Seq[LogicalPlan]): Seq[LogicalPlan] = plans map sqlContext.sessionState.optimizer.execute
 
-      //val analyzed : Seq[LogicalPlan] =  plans map sqlContext.sessionState.analyzer.execute
-     // plans foreach sqlContext.sessionState.analyzer.checkAnalysis
+  private def convertToChunkedJoinPlan(logicalPlans: Seq[LogicalPlan],
+                                       dict: Seq[(LogicalPlan,
+                                         Seq[LogicalPlan])]): Seq[LogicalPlan] = {
 
-    //plans map sqlContext.sessionState.optimizer.execute
-    plans map sqlContext.sessionState.optimizer.execute
-
-  }
-
-  private[sql] def convertToChunkedJoinPlan(logicalPlans: Seq[LogicalPlan],
-                                            dict: Seq[(LogicalPlan,
-                                              Seq[LogicalPlan])]): Seq[LogicalPlan] = {
+    def replaceAllWith(plans: Seq[LogicalPlan], substitution: LogicalPlan): Seq[LogicalPlan] =
+      plans.map(plan => replaceWith(plan, substitution))
 
     def replaceWith(logicalPlan: LogicalPlan, substitution: LogicalPlan): LogicalPlan = {
 
@@ -343,19 +233,13 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
               substitution
           }
         case _ => logicalPlan
-
       }
     }
-
-    def replaceAllWith(plans: Seq[LogicalPlan], substitution: LogicalPlan): Seq[LogicalPlan] =
-      plans.map(plan => replaceWith(plan, substitution))
-
 
     if (dict == Nil || dict.isEmpty)
       logicalPlans
     else {
       val (origin, substitutions) = (dict.head._1, dict.head._2)
-
       val substituted = substitutions.flatMap(substitution => replaceAllWith(logicalPlans, substitution))
       convertToChunkedJoinPlan(substituted, dict.tail)
     }
@@ -363,18 +247,16 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   private def optimizeSubplan(joined: LogicalPlan, conditions: Seq[Expression]): LogicalPlan = {
 
-
     val otherFilters = _otherConditions.reduceLeftOption(And)
 
-
     otherFilters match {
-
       case Some(f) =>
         val filter = logical.Filter(otherFilters.get, joined)
         appendPlan[logical.Filter](originPlan, filter)
       case None =>
         appendPlan[logical.Join](originPlan, joined)
     }
+
 
 
   }
@@ -389,29 +271,21 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
     }
   }
 
+  private def initEquivClasses() = originalConditions.foreach(cond => addEquivMembers(cond))
 
-  private def initEquivClasses: Unit = {
-
-    originalConditions.foreach(cond => addEquivMembers(cond))
-
-
-  }
-
-  private def  doPermutations(plans: Seq[LogicalPlan]): List[(LogicalPlan,
-    List[Expression])] = {
-    if (plans != Nil) {
+  private def doPermutations() = {
+    if (baseRelations != Nil) {
       logDebug("****Extracted Conditions*****")
       logDebug(originalConditions.toString())
       // anylyzed the reordered joins
-      initEquivClasses
+      initEquivClasses()
       logInfo("*** Inititialized equivalence classes ***")
       logInfo(eqClasses.toString())
-      val permutations = permute(plans.toList.reverse)
+      val permutations = permute(baseRelations.toList.reverse)
       logInfo("*** End equivalence classes ***")
       logInfo(eqClasses.toString())
       logInfo("*** othr  Conditions ***")
       logInfo(_otherConditions.toString())
-
       permutations
 
     }
@@ -421,16 +295,13 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   }
 
-
   private def createJoinCondition(left: LogicalPlan, right: LogicalPlan): Set[Expression] = {
-
-
     val joinConditions = eqClasses.map(eqClass =>
       eqClass.generateJoinImpliedEqualities(left, right)
     ).filter(_.isDefined).map(_.get).toSet
+
     joinConditions
   }
-
 
   /** For each element x in List xss, returns (x, xss - x) */
   private[this] def selections[A](xss: List[A]): List[(A, List[A])] = xss match {
@@ -440,32 +311,83 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
         yield (y, x :: ys))
   }
 
-  /** Returns a list containing all permutations of the input list */
- def permute(xs: List[LogicalPlan]): List[(LogicalPlan,
-    List[Expression])] = xs match {
-    case Nil =>Nil
-
-    // special case lists of length 1 and 2 for better performance
-    case t :: Nil => List((t, Nil))
-    case t :: u :: Nil =>
-      val conditions1 = createJoinCondition(t, u)
-      val conditions2 = createJoinCondition(u, t)
-
-      if (conditions1.nonEmpty && conditions2.nonEmpty) {
-        val join = createOrderedJoin(Seq(t, u), conditions1)
-        _trainingSet+= join.semanticHash -> join
-        List((join, conditions1.toList))
-      } else
-        Nil
-
-    case _ =>
-      for ((y, ys) <- selections(xs); ps <- permute(ys) ;conditions = createJoinCondition(ps._1, y ) if conditions.nonEmpty)
-        yield (createOrderedJoin(Seq(ps._1,y),conditions ), ps._2 ++ conditions)
-
+  private def findChunkedBaseRelPlans() = {
+      //  Map every baseRealtion with its HadoopPfRelation
+      val sources = baseRelations.map {
+        case relation@LogicalRelation(h: HadoopPfRelation, _, _) =>
+          (relation, Some(h))
+        case relation => (relation, None)
+      }
+      sources.map {
+        case (parentPlan, baseRelation) =>
+          parentPlan.simpleHash -> splitRelation(parentPlan, baseRelation)
+      }.toMap
   }
 
+  private def splitRelation(plan: LogicalPlan, relation: Option[HadoopPfRelation]): Seq[LogicalPlan] = {
+    val res = relation match {
+      case None => Seq(plan)
+      case Some(h) =>
+        val splittedHPFRelation = h.splitHadoopPfRelation()
 
+        splittedHPFRelation.map { newRel =>
+          plan transform {
+            case l@LogicalRelation(h: HadoopPfRelation, a, b) =>
+              LogicalRelation(newRel, Some(l.output), b)
+          }
+        }
+    }
+    assert(res.forall(r => r.semanticHash == plan.semanticHash))
+    res
+  }
 
+  private def buildJoinAlternatives() = inferedPlans.map { case (plan, conditions) => findRootJoin(optimizeSubplan(plan, conditions)) }
 
+  private def buildColumnStatPlans() = {
 
+    def pruneFilters(plan: LogicalPlan) = {
+      val condition = _otherConditions.toSeq.
+        filter(c => c.references.subsetOf(plan.outputSet))
+
+      val newChild = condition match {
+        case Seq() => plan
+        case c => logical.Filter(condition.reduceLeft(And), plan)
+      }
+      newChild
+    }
+
+    def createProjection(projectList: Seq[NamedExpression], plan: LogicalPlan) = {
+      projectList.map { p =>
+        val analyzed = sqlContext.sessionState.analyzer
+          .execute(logical.Distinct(logical.Project(Seq(p), plan)))
+
+        p -> sqlContext.sessionState.optimizer.execute(analyzed)
+      }
+    }
+
+    baseRelations.flatMap(
+      plan => {
+        val projectList = eqClasses.flatMap {
+          eqc => eqc.members
+            .map(m => m.outputSet.references)
+            .filter(r => r.subsetOf(plan.outputSet))
+            .map(s => s.head)
+        }.toSeq
+
+        createProjection(projectList, pruneFilters(plan))
+      }
+
+    ).toMap
+  }
+
+  private def findRootJoin(plan: LogicalPlan): LogicalPlan = {
+
+    plan match {
+
+      case j@Join(_, _, _, _) => j
+      case node: logical.UnaryNode => findRootJoin(node.child)
+      case _ => throw new IllegalArgumentException("Only UnaryNode must be above a Join")
+    }
+
+  }
 }
