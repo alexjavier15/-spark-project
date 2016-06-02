@@ -153,8 +153,8 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
     val queryExecution = new QueryExecution(sqlContext, _bestLogical)
 
-    _bestPlan = queryExecution.sqlContext.sessionState.planner.
-      plan(queryExecution.sqlContext.sessionState.optimizer.execute(_bestLogical)).next
+    _bestPlan = sqlContext.sessionState.planner.
+      plan(sqlContext.sessionState.optimizer.execute(_bestLogical)).next
     logInfo("****New Optimized plan****")
     logInfo(_bestPlan.toString())
     logDebug("****SelectivityPlan filters****")
@@ -168,7 +168,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
     plan match {
 
-      case j  : HashJoin => j
+      case j  @ ShuffledHashJoin(_,_,_,_,_,_,_) => j
       case node: UnaryNode => findRootJoin(node.child)
       case _ => throw new IllegalArgumentException("Only UnaryNode must be above a Join")
     }
@@ -347,8 +347,9 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       //optimizeJoinOrderFromJoinExecution
       optimizeJoinOrderFromELS()
     }
-
-    EnsureRequirements(this.sqlContext.conf)(findRootJoin(_bestPlan)).execute()
+    val executedPlan = sqlContext.sessionState.prepareForExecution.execute(_bestPlan)
+    println(executedPlan)
+    executedPlan.execute()
   }
 
 

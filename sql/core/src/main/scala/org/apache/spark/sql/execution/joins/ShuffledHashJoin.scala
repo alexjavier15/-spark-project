@@ -94,18 +94,9 @@ case class ShuffledHashJoin(
     val numOutputRows = longMetric("numOutputRows")
     val numStreamedMatchedRows =longMetric("numStreamedMatchedRows")
    // val numRows = longMetric(NUM_ROWS_KEY)
-    val hashTableSize = statistics match {
-
-      case Some(s) if buildSide == BuildRight =>
-                s.getOrElse("rightRows",64L).asInstanceOf[Int]
-      case Some(s) if buildSide == BuildLeft =>
-        s.getOrElse("leftRows",64L).asInstanceOf[Int]
-       case _ => 64
-
-    }
 
     streamedPlan.execute().zipPartitions(buildPlan.execute()) { (streamIter, buildIter) =>
-      val hashed = HashedRelation(buildIter.map(_.copy()), buildSideKeyGenerator,hashTableSize)
+      val hashed = HashedRelation(buildIter.map(_.copy()), buildSideKeyGenerator)
       val joinedRow = new JoinedRow
       joinType match {
         case Inner =>
