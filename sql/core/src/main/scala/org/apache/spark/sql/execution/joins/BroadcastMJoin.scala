@@ -18,15 +18,18 @@
 package org.apache.spark.sql.execution.joins
 
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.{InternalRow, expressions}
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans._
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReturnAnswer}
+import org.apache.spark.sql.catalyst.plans.physical.Partitioning
+import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreeNode
-import org.apache.spark.sql.execution._
+import org.apache.spark.sql.execution.{ScalarSubquery, _}
 import org.apache.spark.sql.execution.datasources.LogicalRelation
 import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
 import org.apache.spark.sql.execution.exchange.EnsureRequirements
+import org.apache.spark.sql.internal.{SQLConf, SessionState}
 import org.apache.spark.sql.types.IntegerType
 
 import scala.collection.mutable
@@ -54,7 +57,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
   private val _subplansMap = JoinOptimizer.joinOptimizer.joinAlternatives.groupBy{
     subplan => subplan.simpleHash}.map{ case (a,b)=> a -> b.head }
 
-
+  override def output: Seq[Attribute] = Seq()
 
   private def combine[A]( chunks: List[Seq[A]]): Seq[Seq[A]] = {
 
@@ -78,8 +81,6 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
 
 
-
-
   /**
   * Overridden by concrete implementations of SparkPlan. It is guaranteed to run before any
   * `execute` of SparkPlan. This is helpful if we want to set up some state before executing the
@@ -88,7 +89,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
   * Note: the prepare method has already walked down the tree, so the implementation doesn't need
   * to call children's prepare methods.
   */
-  override protected def doPrepare(): Unit = {
+    def doBestPlan(): SparkPlan = {
 
     JoinOptimizer.joinOptimizer.joinAlternatives.foreach{ plan =>
         val selPlan = SelectivityPlan(plan)
@@ -104,6 +105,21 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
     logDebug(SelectivityPlan._selectivityPlanNodes.toString())
     logDebug("****SelectivityPlan filters****")
     logDebug(SelectivityPlan._filterStats.toString())
+
+
+    val rddBuffer = ArrayBuffer[RDD[InternalRow]]()
+    sqlContext.setConf("spark.sql.mjoin", "false")
+    var executedRDD: RDD[InternalRow] = null
+    var duration: Long = 0L
+    var tested = false
+    var passes = 0
+    while (_pendingSubplans.hasNext && !found) {
+      //optimizeJoinOrderFromJoinExecution
+      optimizeJoinOrderFromELS()
+    }
+    val executedPlan =_bestPlan
+    println(executedPlan)
+    findRootJoin(executedPlan)
 
   }
 
@@ -164,7 +180,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
 
 
-  def findRootJoin(plan: SparkPlan): SparkPlan = {
+  private def findRootJoin(plan: SparkPlan): SparkPlan = {
 
     plan match {
 
@@ -175,7 +191,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
   }
 
-  def optimizeJoinOrderFromJoinExecution(): Unit ={
+  private def optimizeJoinOrderFromJoinExecution(): Unit ={
 
 
     /*val subplan = _pendingSubplans.next().map { plan => plan.semanticHash -> plan }.toMap
@@ -271,7 +287,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 */
   }
 
-  def optimizeJoinOrderFromELS(): Unit ={
+  private def optimizeJoinOrderFromELS(): Unit ={
     sparkContext.withScope {
 
       val seed = System.currentTimeMillis()
@@ -336,25 +352,8 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
   override protected def doExecute(): RDD[InternalRow] = {
 
-
-    val rddBuffer = ArrayBuffer[RDD[InternalRow]]()
-    sqlContext.setConf("spark.sql.mjoin", "false")
-    var executedRDD: RDD[InternalRow] = null
-    var duration: Long = 0L
-    var tested = false
-    var passes = 0
-    while (_pendingSubplans.hasNext && !found) {
-      //optimizeJoinOrderFromJoinExecution
-      optimizeJoinOrderFromELS()
-    }
-    val executedPlan = sqlContext.sessionState.prepareForExecution.execute(_bestPlan)
-    println(executedPlan)
-    findRootJoin(executedPlan).execute()
+      child.execute()
   }
-
-
-  override def output: Seq[Attribute] = child.output
-
 
 }
 
@@ -732,4 +731,18 @@ case class HashCondition(left : SelectivityPlan,
   override def children: Seq[SelectivityPlan] = Seq(left) ++ Seq(right)
 
 
+}
+/**
+  * Convert the subquery from logical plan into executed plan.
+  */
+case class PrepareChunks(conf: SQLConf) extends Rule[SparkPlan] {
+  def apply(plan: SparkPlan): SparkPlan = {
+    if(conf.mJoinEnabled) {
+      plan transformDown {
+        case mjoin@BroadcastMJoin(_) =>
+          mjoin.doBestPlan()
+      }
+    }else
+      plan
+  }
 }
