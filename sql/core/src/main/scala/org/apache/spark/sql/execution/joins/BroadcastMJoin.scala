@@ -186,7 +186,9 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
     plan match {
 
-      case j  @ ShuffledHashJoin(_,_,_,_,_,_,_) => j
+      case shuffle  @ ShuffledHashJoin(_,_,_,_,_,_,_) => shuffle
+      case broadcast @ BroadcastHashJoin(_,_,_,_,_,_,_) =>broadcast
+      case merge @ SortMergeJoin(_,_,_,_,_,_) => merge
       case node: UnaryNode => findRootJoin(node.child)
       case _ => throw new IllegalArgumentException("Only UnaryNode must be above a Join")
     }
