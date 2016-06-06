@@ -294,7 +294,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       val currSubplan = _pendingSubplans.next()
       val fshash : LogicalPlan => Int = p => p.output.map(a=>a.semanticHash()).sum
       val subplan = currSubplan.map { plan => plan.semanticHash -> plan }.toMap
-      println(subplan)
+
 
       val columnStatPlans = JoinOptimizer.joinOptimizer.columnStatPlans.map {
         case (attribute ,plan) => {
