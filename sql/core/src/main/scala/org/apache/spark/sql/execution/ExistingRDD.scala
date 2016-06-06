@@ -132,7 +132,13 @@ private[sql] case class DataSourceScan(
   extends LeafNode with CodegenSupport {
 
 
-  override def simpleHash : Int = relation.simpleHash
+  override def simpleHash : Int = {
+    var  h = 17
+    h += 37 *relation.simpleHash
+    h += output.map(attr => attr.semanticHash()).sum
+    h
+
+  }
   override def semanticHash : Int = {
     var  h = 17
     h += 37 *relation.semanticHash
