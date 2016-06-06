@@ -85,7 +85,7 @@
     </mailingList>
   </mailingLists>
 
-  <modules>
+ <modules>
     <module>common/sketch</module>
     <module>common/network-common</module>
     <module>common/network-shuffle</module>

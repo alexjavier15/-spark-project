@@ -657,7 +657,7 @@ private[sql] object DataSourceStrategy extends Strategy with Logging {
       val scan = execution.DataSourceScan(
         projects.map(_.toAttribute),
         scanBuilder(requestedColumns, candidatePredicates, pushedFilters),
-        relation.relation, metadata)
+        relation.relation, metadata, relation.output)
        filterCondition.map(execution.Filter(_, scan)).getOrElse(scan)
     } else {
       // Don't request columns that are only referenced by pushed filters.
@@ -667,7 +667,7 @@ private[sql] object DataSourceStrategy extends Strategy with Logging {
       val scan = execution.DataSourceScan(
         requestedColumns,
         scanBuilder(requestedColumns, candidatePredicates, pushedFilters),
-        relation.relation, metadata)
+        relation.relation, metadata, relation.output)
      execution.Project(
         projects, filterCondition.map(execution.Filter(_, scan)).getOrElse(scan))
 

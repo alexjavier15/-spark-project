@@ -37,8 +37,20 @@ case class LogicalRelation(
   extends LeafNode with MultiInstanceRelation {
 
 
-  override def simpleHash : Int = relation.simpleHash
-  override def semanticHash : Int = relation.semanticHash
+  override def simpleHash : Int = {
+    var h = 17
+    h += 37 *relation.simpleHash
+    h += 37* output.map(a => a.semanticHash()).sum
+    h
+
+  }
+  override def semanticHash :  Int = {
+    var h = 17
+    h += 37 *relation.semanticHash
+    h += 37* output.map(a => a.semanticHash()).sum
+    h
+
+  }
   override val output: Seq[AttributeReference] = {
     val attrs = relation.schema.toAttributes
 
