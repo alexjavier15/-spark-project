@@ -133,8 +133,13 @@ private[sql] case class DataSourceScan(
 
 
   override def simpleHash : Int = relation.simpleHash
-  override def semanticHash : Int = relation.semanticHash
- // println("Initiating datasource scan for _" + this + " hashcode :" + hashcode)
+  override def semanticHash : Int = {
+    var  h = 17
+    h += 37 *relation.semanticHash
+    h += output.map(attr => attr.semanticHash()).sum
+    h
+
+  } // println("Initiating datasource scan for _" + this + " hashcode :" + hashcode)
 
   /*override def hashCode(): Int = hashcode
 
