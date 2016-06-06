@@ -156,6 +156,8 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       case _ => false
 
     }
+    logDebug("****SelectivityPlan filters****")
+    logDebug(SelectivityPlan._filterStats.toString())
     val bestPlan =validPlans.
       minBy{
         case (hc,selPlan) => selPlan.planCost()
@@ -700,7 +702,7 @@ case class HashCondition(left : SelectivityPlan,
     condition.selectivity
   }
 
-  override def rows: Long =   rowsFromExecution.getOrElse(children.map(_.rows).foldLeft(selectivity)(_*_).toLong)
+  override def rows: Long =    rowsFromExecution.getOrElse(Math.ceil(children.map(_.rows).foldLeft(selectivity)(_*_)).toLong)
 
 
 
