@@ -128,24 +128,27 @@ private[sql] case class DataSourceScan(
     output: Seq[Attribute],
     rdd: RDD[InternalRow],
     @transient relation: BaseRelation,
-    override val metadata: Map[String, String] = Map.empty)
+    override val metadata: Map[String, String] = Map.empty,
+    originalOutput: Seq[Attribute] = Seq.empty)
+
   extends LeafNode with CodegenSupport {
 
 
   override def simpleHash : Int = {
-    var  h = 17
+    var h = 17
     h += 37 *relation.simpleHash
-    h += output.map(attr => attr.semanticHash()).sum
+    h += 37* originalOutput.map(a => a.semanticHash()).sum
     h
 
   }
-  override def semanticHash : Int = {
-    var  h = 17
+  override def semanticHash :  Int = {
+    var h = 17
     h += 37 *relation.semanticHash
-    h += output.map(attr => attr.semanticHash()).sum
+    h += 37* originalOutput.map(a => a.semanticHash()).sum
     h
 
-  } // println("Initiating datasource scan for _" + this + " hashcode :" + hashcode)
+  }
+ // println("Initiating datasource scan for _" + this + " hashcode :" + hashcode)
 
   /*override def hashCode(): Int = hashcode
 

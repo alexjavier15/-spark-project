@@ -85,7 +85,7 @@
     </mailingList>
   </mailingLists>
 
-  <modules>
+ <modules>
     <module>common/sketch</module>
     <module>common/network-common</module>
     <module>common/network-shuffle</module>
@@ -98,10 +98,10 @@
     <module>streaming</module>
     <module>sql/catalyst</module>
     <module>sql/core</module>
-    <module>sql/hive</module>
+    <!--  <module>sql/hive</module> -->
     <module>external/docker-integration-tests</module>
     <module>assembly</module>
-    <module>examples</module>
+    <!--  <module>examples</module> -->
     <module>repl</module>
     <module>launcher</module>
     <module>external/kafka</module>

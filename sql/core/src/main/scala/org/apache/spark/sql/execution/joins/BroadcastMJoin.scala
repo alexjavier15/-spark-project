@@ -292,20 +292,22 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
       val seed = System.currentTimeMillis()
       val currSubplan = _pendingSubplans.next()
+      val fshash : LogicalPlan => Int = p => p.output.map(a=>a.semanticHash()).sum
       val subplan = currSubplan.map { plan => plan.semanticHash -> plan }.toMap
+      println(subplan)
 
       val columnStatPlans = JoinOptimizer.joinOptimizer.columnStatPlans.map {
         case (attribute ,plan) => {
 
           val transformedPlan = sqlContext.sessionState.planner.plan(
             plan  transformUp {
-            case relation  @ LogicalRelation(h: HadoopPfRelation, _, _)=>
-              val ds  = subplan(h.semanticHash)
-              assert(ds.semanticHash == relation.semanticHash)
+              case relation  @ LogicalRelation(h: HadoopPfRelation, _, _)=>
+                val ds  = subplan(relation.semanticHash)
+                assert(ds.semanticHash == relation.semanticHash)
                 logical.LocalLimit(Literal(100000),ds)
 
 
-          } ).next()
+            } ).next()
 
           attribute -> transformedPlan
         }
@@ -316,8 +318,8 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
         sparkPlan match {
           case f @ Filter(_,_) => f.getOutputRows
           case u : UnaryNode => getCardinality(u.child)
-          case scan @ DataSourceScan(_,_,_,_) => scan.getOutputRows
-          case _ => throw  new UnsupportedOperationException(" Could not ger cardinality")
+          case scan @ DataSourceScan(_,_,_,_,_) => scan.getOutputRows
+          case _ => throw  new UnsupportedOperationException(" Could not get cardinality")
 
         }
 
@@ -482,7 +484,7 @@ object SelectivityPlan {
             selPlan.setRowsFromExecution(rows)
             selPlan.setNumPartitionsFromExecution(sparkPlan.getNumPartitions)
         }*/
-      case f@Filter(condition,child0@DataSourceScan(_, _, _, _)) =>
+      case f@Filter(condition,child0@DataSourceScan(_, _, _, _,_)) =>
         _selectivityPlanNodes(f.semanticHash).setRowsFromExecution(f.getOutputRows)
 
       case u: UnaryNode => updatefromExecution(u.child)
@@ -552,9 +554,9 @@ object SelectivityPlan {
       }
 
       case  l @LogicalRelation(h: HadoopPfRelation, a, b) =>
-        val semanticHashCode = h.semanticHash
+        val semanticHashCode = l.semanticHash
         _selectivityPlanNodes.getOrElseUpdate(semanticHashCode, {
-          ScanCondition(l.output, None , h.semanticHash)
+          ScanCondition(l.output, None , l.semanticHash)
         })
 
 
