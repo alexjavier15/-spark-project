@@ -27,8 +27,8 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreeNode
 import org.apache.spark.sql.execution.{ScalarSubquery, _}
 import org.apache.spark.sql.execution.datasources.LogicalRelation
-import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
-import org.apache.spark.sql.execution.exchange.EnsureRequirements
+import org.apache.spark.sql.execution.datasources.pf.{HadoopPfRelation, PFRelation}
+import org.apache.spark.sql.execution.exchange.{EnsureRequirements, ExchangeCache}
 import org.apache.spark.sql.internal.{SQLConf, SessionState}
 import org.apache.spark.sql.types.IntegerType
 
@@ -48,8 +48,10 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
   var found = false
   private val numSampledRows : Int = 10000
   private var _bestPlan = child
+  private var _bestLogical : LogicalPlan = null
   private var _samplingFactor : Option[Long] = None
-  private var _pendingSubplans  =initSubplans()
+  private lazy val _pendingSubplansSeq : Seq[Seq[LogicalPlan]]=initSubplans()
+  private lazy val _pendingSubplans  =_pendingSubplansSeq.toIterator
   private var _lastCost = 0.0
   private val samplingFactor = 0.1
   private val bucketSize =  8.0 * 1024*1024
@@ -72,10 +74,9 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
     }
   }
 
-  private[this] def initSubplans():Iterator[Seq[LogicalPlan]] ={
+  private[this] def initSubplans():Seq[Seq[LogicalPlan]] ={
 /** For each element x in List xss, returns (x, xss - x)   **/
-    val res = combine[LogicalPlan]( JoinOptimizer.joinOptimizer.chunkedRels.values.toList)
-    res.toIterator
+   combine[LogicalPlan]( JoinOptimizer.joinOptimizer.chunkedRels.values.toList)
 
   }
 
@@ -118,8 +119,35 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       optimizeJoinOrderFromELS()
     }
     val executedPlan =_bestPlan
-    println(executedPlan)
-    findRootJoin(executedPlan)
+
+    val all = _pendingSubplansSeq.map{
+
+      plan =>
+        val subplans = plan.map( p => p.semanticHash -> p).toMap
+
+       val transformed = _bestLogical transformUp  {
+
+          case l @ LogicalRelation(_,_,_) =>
+            subplans(l.semanticHash)
+        }
+        transformed
+
+
+    }
+
+    val optimized =  all.map { m =>
+      val optPlan = sqlContext.sessionState.optimizer.execute(m)
+      val planed = sqlContext.sessionState.planner.plan(optPlan).next
+      findRootJoin(planed)
+
+    }
+
+    val res = Union(optimized.toSeq)
+
+    println("hits: " +PFRelation.hits)
+
+    res
+   // findRootJoin(executedPlan)
 
   }
 
@@ -166,7 +194,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
     logInfo("****Min  plan****")
     logInfo(bestPlan.toString())
     val oldPlan = _bestPlan
-    val _bestLogical = _subplansMap(bestPlan._1)
+   _bestLogical = _subplansMap(bestPlan._1)
     found =  bestPlan._1 != _bestPlan.semanticHash
 
     val queryExecution = new QueryExecution(sqlContext, _bestLogical)
@@ -179,7 +207,17 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
     logDebug(SelectivityPlan._filterStats.toString())
   }
 
+  private def findRootJoin0(plan: LogicalPlan): LogicalPlan = {
 
+    plan match {
+
+      case join  @ logical.Join(_,_,_,_)=> join
+
+      case node: logical.UnaryNode => findRootJoin0(node.child)
+      case _ => throw new IllegalArgumentException("Only UnaryNode must be above a Join")
+    }
+
+  }
 
 
   private def findRootJoin(plan: SparkPlan): SparkPlan = {
@@ -193,6 +231,78 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       case _ => throw new IllegalArgumentException("Only UnaryNode must be above a Join")
     }
 
+  }
+
+
+  private def optimizeJoinOrderFromELS(): Unit ={
+    sparkContext.withScope {
+
+      val seed = System.currentTimeMillis()
+      val currSubplan = _pendingSubplans.next()
+      val fshash : LogicalPlan => Int = p => p.output.map(a=>a.semanticHash()).sum
+      val subplan = currSubplan.map { plan => plan.semanticHash -> plan }.toMap
+
+
+      val columnStatPlans = JoinOptimizer.joinOptimizer.columnStatPlans.map {
+        case (attribute ,plan) => {
+
+          val transformedPlan = sqlContext.sessionState.planner.plan(
+            plan  transformUp {
+              case relation  @ LogicalRelation(h: HadoopPfRelation, _, _)=>
+                val ds  = subplan(relation.semanticHash)
+                assert(ds.semanticHash == relation.semanticHash)
+                logical.LocalLimit(Literal(100000),ds)
+
+
+            } ).next()
+
+          attribute -> transformedPlan
+        }
+      }
+
+      def getCardinality(sparkPlan : SparkPlan) : Long ={
+
+        sparkPlan match {
+          case f @ Filter(_,_) => f.getOutputRows
+          case u : UnaryNode => getCardinality(u.child)
+          case scan @ DataSourceScan(_,_,_,_,_) => scan.getOutputRows
+          case _ => throw  new UnsupportedOperationException(" Could not get cardinality")
+
+        }
+
+      }
+
+
+
+
+      val distinctsAttrMap = columnStatPlans.map {
+        case (attribute ,plan) => {
+          plan.resetChildrenMetrics
+        val  count = EnsureRequirements(this.sqlContext.conf)(plan).execute().count()
+          (plan ,attribute.semanticHash(), attribute) -> (count ,getCardinality(plan))
+        }
+      }
+      val columnsStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => h -> s }
+      val cardinalityStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => p -> c }
+      SelectivityPlan._filterStats.values.foreach{
+        f => f.computeSelctivityFromColumn(columnsStats )
+      }
+      cardinalityStats.foreach{
+        case (p,c) => SelectivityPlan._selectivityPlanNodes(p.semanticHash).setRows(c)
+
+      }
+     ExchangeCache.clear()
+     updateSelectivities()
+
+
+    }
+
+
+  }
+
+  override protected def doExecute(): RDD[InternalRow] = {
+
+      child.execute()
   }
 
   private def optimizeJoinOrderFromJoinExecution(): Unit ={
@@ -289,76 +399,6 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       }
 
 */
-  }
-
-  private def optimizeJoinOrderFromELS(): Unit ={
-    sparkContext.withScope {
-
-      val seed = System.currentTimeMillis()
-      val currSubplan = _pendingSubplans.next()
-      val fshash : LogicalPlan => Int = p => p.output.map(a=>a.semanticHash()).sum
-      val subplan = currSubplan.map { plan => plan.semanticHash -> plan }.toMap
-
-
-      val columnStatPlans = JoinOptimizer.joinOptimizer.columnStatPlans.map {
-        case (attribute ,plan) => {
-
-          val transformedPlan = sqlContext.sessionState.planner.plan(
-            plan  transformUp {
-              case relation  @ LogicalRelation(h: HadoopPfRelation, _, _)=>
-                val ds  = subplan(relation.semanticHash)
-                assert(ds.semanticHash == relation.semanticHash)
-                logical.LocalLimit(Literal(100000),ds)
-
-
-            } ).next()
-
-          attribute -> transformedPlan
-        }
-      }
-
-      def getCardinality(sparkPlan : SparkPlan) : Long ={
-
-        sparkPlan match {
-          case f @ Filter(_,_) => f.getOutputRows
-          case u : UnaryNode => getCardinality(u.child)
-          case scan @ DataSourceScan(_,_,_,_,_) => scan.getOutputRows
-          case _ => throw  new UnsupportedOperationException(" Could not get cardinality")
-
-        }
-
-      }
-
-
-
-
-      val distinctsAttrMap = columnStatPlans.map {
-        case (attribute ,plan) => {
-          plan.resetChildrenMetrics
-        val  count = EnsureRequirements(this.sqlContext.conf)(plan).execute().count()
-          (plan ,attribute.semanticHash(), attribute) -> (count ,getCardinality(plan))
-        }
-      }
-      val columnsStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => h -> s }
-      val cardinalityStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => p -> c }
-      SelectivityPlan._filterStats.values.foreach{
-        f => f.computeSelctivityFromColumn(columnsStats )
-      }
-      cardinalityStats.foreach{
-        case (p,c) => SelectivityPlan._selectivityPlanNodes(p.semanticHash).setRows(c)
-
-      }
-
-     updateSelectivities()
-
-    }
-
-
-  }
-
-  override protected def doExecute(): RDD[InternalRow] = {
-
-      child.execute()
   }
 
 }
@@ -746,7 +786,8 @@ case class PrepareChunks(conf: SQLConf) extends Rule[SparkPlan] {
     if(conf.mJoinEnabled) {
       plan transformDown {
         case mjoin@BroadcastMJoin(_) =>
-          mjoin.doBestPlan()
+         mjoin.doBestPlan()
+
       }
     }else
       plan

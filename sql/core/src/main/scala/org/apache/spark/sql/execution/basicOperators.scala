@@ -35,6 +35,7 @@ case class Project(projectList: Seq[NamedExpression], child: SparkPlan)
     child.asInstanceOf[CodegenSupport].upstreams()
   }
 
+
   protected override def doProduce(ctx: CodegenContext): String = {
     child.asInstanceOf[CodegenSupport].produce(ctx, this)
   }
@@ -359,6 +360,8 @@ case class Union(children: Seq[SparkPlan]) extends SparkPlan {
 
   protected override def doExecute(): RDD[InternalRow] =
     sparkContext.union(children.map(_.execute()))
+  override def simpleHash: Int = children.map(_.simpleHash).sum
+
 }
 
 /**

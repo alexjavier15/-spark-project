@@ -8,14 +8,17 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.SparkContext
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.execution.datasources.BucketSpec
-import org.apache.spark.sql.sources.{HadoopFsRelation, PFileCatalog}
+import org.apache.spark.sql.sources.{Filter, HadoopFsRelation, PFileCatalog}
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.json4s.DefaultFormats
 import org.json4s.jackson.JsonMethods._
 
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 import scala.io.BufferedSource
 import scala.io.Source._
 
@@ -23,6 +26,22 @@ import scala.io.Source._
   * Created by alex on 18.03.16.
   */
 
+case class CachedRDD(rdd: RDD[InternalRow] ,relation : HadoopPfRelation, requiredColumns: Array[String] , filters: Array[Filter]){
+
+  def sameResult (relation0 : HadoopPfRelation,
+                   requiredColumns0: Array[String] ,
+                   filters0: Array[Filter]) : Boolean ={
+
+    if(relation.simpleHash == relation0.simpleHash){
+      !requiredColumns0.exists( s => !requiredColumns.contains(s)) &&
+      !filters0.exists(f => !filters.contains(f))
+
+    }else
+      false
+
+  }
+
+}
 class HadoopPfRelation(override val sqlContext: SQLContext,
                        @transient pFLocation: PFileCatalog,
                             partitionSchema: StructType,
@@ -43,11 +62,12 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
   var uniqueID : Int = pFileDesc.hashCode()
 
   def hasParent : Boolean = parent!=null
-    println("Initiating HaddopPfRelation  ")
+
+   /* println("Initiating HaddopPfRelation  ")
     pFLocation.allFiles().foreach(f=>{
       import sys.process._
       "xattr -l "+ f.getPath.toString.substring(5) !
-      })
+      })*/
 
 
   def isChild(relation : HadoopPfRelation): Boolean = hasParent && parent == relation
@@ -98,6 +118,7 @@ protected[sql] object PFRelation extends Logging {
 
   lazy val sparkContext = SparkContext.getOrCreate()
   private var _dataSources = mutable.Set[HadoopPfRelation]()
+  private val rddCache = mutable.HashMap[Int , ArrayBuffer[CachedRDD]]()
   val CHUNK_NUM = "ChunkNumber"
   val CHUNK_RECORDS = "ChunkRecords"
   val GET_CHUNK = "GET:"
@@ -105,6 +126,7 @@ protected[sql] object PFRelation extends Logging {
   val NEXT_CHUNK = "NEXT:"
   val REMOTE_PORT = 9999
   val REMOTE_ADRESS = "localhost"
+  var hits : Int  =0
 
   var connector = new Socket()
 
@@ -125,6 +147,26 @@ protected[sql] object PFRelation extends Logging {
     out.flush
     connector.close
     reply
+
+  }
+
+  def getCachedRDD(relation : HadoopPfRelation, requiredColumns: Array[String] , filters: Array[Filter]): Option[RDD[InternalRow]] ={
+
+    val buffer = rddCache.getOrElseUpdate(relation.simpleHash, ArrayBuffer[CachedRDD]())
+    val sameRdd = buffer.find( rdd => rdd.sameResult(relation,requiredColumns,filters))
+    if(sameRdd.isDefined){
+      hits+=1
+      Some(sameRdd.get.rdd)
+    }
+    else
+      None
+
+  }
+
+  def cacheRDD(relation : HadoopPfRelation, cachedRDD : CachedRDD) ={
+
+    val buffer = rddCache.getOrElseUpdate(relation.simpleHash, ArrayBuffer[CachedRDD]())
+      buffer+=cachedRDD
 
   }
 

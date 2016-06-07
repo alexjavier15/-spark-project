@@ -138,7 +138,7 @@ case class EnsureRequirements(conf: SQLConf) extends Rule[SparkPlan] {
             val targetPartitioning =
               createPartitioning(distribution, defaultNumPreShufflePartitions)
             assert(targetPartitioning.isInstanceOf[HashPartitioning])
-            ShuffleExchange(targetPartitioning, child, Some(coordinator))
+            ExchangeCache.getOrCreateShuffleExchange(targetPartitioning, child, Some(coordinator))
         }
       } else {
         // If we do not need ExchangeCoordinator, the original children are returned.
@@ -162,7 +162,7 @@ case class EnsureRequirements(conf: SQLConf) extends Rule[SparkPlan] {
       case (child, BroadcastDistribution(mode)) =>
         BroadcastExchange(mode, child)
       case (child, distribution) =>
-        ShuffleExchange(createPartitioning(distribution, defaultNumPreShufflePartitions), child)
+        ExchangeCache.getOrCreateShuffleExchange(createPartitioning(distribution, defaultNumPreShufflePartitions), child, None)
     }
 
     // If the operator has multiple children and specifies child output distributions (e.g. join),
@@ -215,8 +215,8 @@ case class EnsureRequirements(conf: SQLConf) extends Rule[SparkPlan] {
               child match {
                 // If child is an exchange, we replace it with
                 // a new one having targetPartitioning.
-                case ShuffleExchange(_, c, _) => ShuffleExchange(targetPartitioning, c)
-                case _ => ShuffleExchange(targetPartitioning, child)
+                case ShuffleExchange(_, c, _) => ExchangeCache.getOrCreateShuffleExchange(targetPartitioning, c, None)
+                case _ => ExchangeCache.getOrCreateShuffleExchange(targetPartitioning, child, None)
               }
           }
         }

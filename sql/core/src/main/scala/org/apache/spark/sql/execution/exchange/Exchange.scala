@@ -57,6 +57,8 @@ case class ReusedExchange(override val output: Seq[Attribute], child: Exchange) 
     child.execute()
   }
 
+  override def simpleHash: Int = child.simpleHash
+
   override protected[sql] def doExecuteBroadcast[T](): broadcast.Broadcast[T] = {
     child.executeBroadcast()
   }

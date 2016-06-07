@@ -32,6 +32,46 @@ import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.sql.execution._
 import org.apache.spark.util.MutablePair
 
+import scala.collection.mutable.{ArrayBuffer, HashMap}
+
+
+object ExchangeCache{
+
+  val ShuffledExchangeCache = HashMap[Int, ArrayBuffer[ShuffleExchange]]()
+
+  def getOrCreateShuffleExchange(newPartitioning: Partitioning,
+                                 child: SparkPlan,
+                                 @transient coordinator: Option[ExchangeCoordinator]): SparkPlan ={
+
+    val cached = ShuffledExchangeCache.getOrElseUpdate(child.simpleHash, ArrayBuffer[ShuffleExchange]())
+    val sameExchange = cached.find(s => s.newPartitioning == newPartitioning)
+    if(sameExchange.isDefined ){
+      sameExchange.get match {
+        case s @ ShuffleExchange(_,_,Some(c) )   if coordinator.isDefined && coordinator.get == c=>
+
+          sameExchange.get
+
+        case s @ ShuffleExchange(_,_, None  ) if coordinator.isEmpty =>
+          sameExchange.get
+        case _ =>
+            val newExchange = ShuffleExchange(newPartitioning,child,coordinator)
+            cached+=newExchange
+            newExchange
+      }
+    }else{
+      val newExchange = ShuffleExchange(newPartitioning,child,coordinator)
+      cached+=newExchange
+      newExchange
+    }
+  }
+
+  def clear () : Unit ={
+    ShuffledExchangeCache.clear()
+
+  }
+
+
+}
 /**
  * Performs a shuffle that will result in the desired `newPartitioning`.
  */
@@ -39,6 +79,8 @@ case class ShuffleExchange(
     var newPartitioning: Partitioning,
     child: SparkPlan,
     @transient coordinator: Option[ExchangeCoordinator]) extends Exchange {
+
+
 
   override def nodeName: String = {
     val extraInfo = coordinator match {

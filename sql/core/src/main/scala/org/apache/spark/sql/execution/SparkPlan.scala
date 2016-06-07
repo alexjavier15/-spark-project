@@ -534,11 +534,7 @@ private[sql] trait UnaryNode extends SparkPlan {
 
   override def numLeaves: Long = child.numLeaves
 
-  override def  simpleHash: Int =    child match {
-    case l : LeafNode => l.semanticHash
-    case _ =>child.simpleHash
-
-  }
+  override def  simpleHash: Int =   child.simpleHash
 
 
   //override def rows(): Long = child.rows()

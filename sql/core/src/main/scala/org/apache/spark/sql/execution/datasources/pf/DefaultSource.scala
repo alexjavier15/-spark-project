@@ -91,8 +91,16 @@ class DefaultSource extends org.apache.spark.sql.execution.datasources.csv.Defau
                                  , broadcastedConf: Broadcast[SerializableConfiguration],
                                  options: Map[String, String], relation : HadoopPfRelation  = null): RDD[InternalRow] = {
 
+    val cached = PFRelation.getCachedRDD(relation,requiredColumns ,filters)
+    if(cached.isDefined)
+      cached.get
+    else{
 
-    super.buildInternalScan(sqlContext,dataSchema,requiredColumns,filters,bucketSet,relation.location.allFiles(),broadcastedConf,options)
+    val newRDD = super.buildInternalScan(sqlContext,dataSchema,requiredColumns,filters,bucketSet,relation.location.allFiles(),broadcastedConf,options)
+      PFRelation.cacheRDD(relation, CachedRDD(newRDD,relation,requiredColumns,filters))
+      newRDD
+
+    }
 
   }
 

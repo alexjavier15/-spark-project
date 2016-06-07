@@ -21,6 +21,7 @@ import org.apache.spark.rdd.{RDD, UnionRDD}
 import org.apache.spark.sql.{AnalysisException, SQLContext}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReturnAnswer}
+import org.apache.spark.sql.execution.exchange.ExchangeCache
 
 /**
   * The primary workflow for executing relational queries using Spark.  Designed to allow easy
@@ -73,9 +74,10 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
     // executedPlan should not be used to initialize any SparkPlan. It should be
     // only used for execution.
     lazy val executedPlan: SparkPlan = {
-
+      ExchangeCache.clear()
       val res = sqlContext.sessionState.prepareForExecution.execute(sparkPlan)
       SparkOptimizer.clear()
+      ExchangeCache.clear()
       res
     }
 
