@@ -335,8 +335,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       val distinctsAttrMap = columnStatPlans.map {
         case (attribute ,plan) => {
           plan.resetChildrenMetrics
-        val  count = EnsureRequirements(this.sqlContext.conf)(plan).execute().count()
-          (plan ,attribute.semanticHash(), attribute) -> (count ,getCardinality(plan))
+          (plan ,attribute.semanticHash(), attribute) -> (EnsureRequirements(this.sqlContext.conf)(plan).execute().count() ,getCardinality(plan))
         }
       }
       val columnsStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => h -> s }
