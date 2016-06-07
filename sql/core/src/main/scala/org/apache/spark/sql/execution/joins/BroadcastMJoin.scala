@@ -29,7 +29,7 @@ import org.apache.spark.sql.catalyst.trees.TreeNode
 import org.apache.spark.sql.execution.aggregate.TungstenAggregate
 import org.apache.spark.sql.execution.{ScalarSubquery, _}
 import org.apache.spark.sql.execution.datasources.LogicalRelation
-import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
+import org.apache.spark.sql.execution.datasources.pf.{HadoopPfRelation, PFRelation}
 import org.apache.spark.sql.execution.exchange.EnsureRequirements
 import org.apache.spark.sql.internal.{SQLConf, SessionState}
 import org.apache.spark.sql.types.IntegerType
@@ -296,12 +296,13 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
   private def optimizeJoinOrderFromELS(): Unit ={
     sparkContext.withScope {
 
+
       val seed = System.currentTimeMillis()
       val currSubplan = _pendingSubplans.next()
       val fshash : LogicalPlan => Int = p => p.output.map(a=>a.semanticHash()).sum
       val subplan = currSubplan.map { plan => plan.semanticHash -> plan }.toMap
 
-
+      sqlContext.conf.setConfString("spark.sql.csvCaching", "true")
       val columnStatPlans = JoinOptimizer.joinOptimizer.columnStatPlans.map {
         case (attribute ,plan) => {
 
@@ -340,10 +341,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       val distinctsAttrMap = columnStatPlans.map {
         case (attribute ,plan) => {
           plan.resetChildrenMetrics
-          val  rdd = EnsureRequirements(this.sqlContext.conf)(plan).execute()
-          val count = rdd.count()
-          rdd.unpersist(false)
-          (plan ,attribute.semanticHash(), attribute) -> (count ,getCardinality(plan))
+          (plan ,attribute.semanticHash(), attribute) -> (EnsureRequirements(this.sqlContext.conf)(plan).execute().count() ,getCardinality(plan))
         }
       }
       val columnsStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => h -> s }
@@ -355,8 +353,9 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
         case (p,c) => SelectivityPlan._selectivityPlanNodes(p.semanticHash).setRows(c)
 
       }
-
+     sqlContext.conf.setConfString("spark.sql.csvCaching", "false")
      updateSelectivities()
+      PFRelation.clear()
 
     }
 

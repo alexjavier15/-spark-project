@@ -29,6 +29,7 @@ import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.UnsafeProjection
 import org.apache.spark.sql.execution.datasources.CompressionCodecs
+import org.apache.spark.sql.execution.datasources.pf.PFRelation
 //import org.apache.spark.sql.execution.datasources.pf.PFileRDD
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
@@ -162,10 +163,10 @@ class DefaultSource extends FileFormat with DataSourceRegister {
     }
   }
 
-  private def readText(
-      sqlContext: SQLContext,
-      options: CSVOptions,
-      location: String): RDD[String] = {
+  private def readText0(
+                        sqlContext: SQLContext,
+                        options: CSVOptions,
+                        location: String): RDD[String] = {
     if (Charset.forName(options.charset) == StandardCharsets.UTF_8) {
       sqlContext.sparkContext.textFile(location)
     } else {
@@ -174,6 +175,22 @@ class DefaultSource extends FileFormat with DataSourceRegister {
         .hadoopFile[LongWritable, Text, TextInputFormat](location,1)
         .mapPartitions(_.map(pair => new String(pair._2.getBytes, 0, pair._2.getLength, charset)))
     }
+
+  }
+
+  private def readText(
+      sqlContext: SQLContext,
+      options: CSVOptions,
+      location: String): RDD[String] = {
+    if( sqlContext.conf.csvCacheEnabled ){
+
+      PFRelation.rddCache.getOrElseUpdate(location , readText0(sqlContext,options,location))
+
+    }
+    else
+      readText0(sqlContext,options,location)
+
+
   }
 }
 

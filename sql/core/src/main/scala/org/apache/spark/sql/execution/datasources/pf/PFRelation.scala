@@ -4,6 +4,7 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.SparkContext
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.execution.datasources.BucketSpec
 import org.apache.spark.sql.sources.{HadoopFsRelation, PFileCatalog}
@@ -17,6 +18,14 @@ import scala.io.Source._
 /**
   * Created by alex on 18.03.16.
   */
+
+
+case class CachedRDD(rdd: RDD[String] ,location : String){
+
+  def sameResult (location0 : String) : Boolean = this.location.equals(location0)
+
+
+}
 
 class HadoopPfRelation(override val sqlContext: SQLContext,
                        @transient pFLocation: PFileCatalog,
@@ -38,12 +47,6 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
   var uniqueID : Int = pFileDesc.hashCode()
 
   def hasParent : Boolean = parent!=null
-    println("Initiating HaddopPfRelation  ")
-    pFLocation.allFiles().foreach(f=>{
-      import sys.process._
-      "xattr -l "+ f.getPath.toString.substring(5) !
-      })
-
 
   def isChild(relation : HadoopPfRelation): Boolean = hasParent && parent == relation
   def  splitHadoopPfRelation(): Seq[HadoopPfRelation] = {
@@ -100,10 +103,15 @@ protected[sql] object PFRelation extends Logging {
   val NEXT_CHUNK = "NEXT:"
   val REMOTE_PORT = 9999
   val REMOTE_ADRESS = "localhost"
+  val rddCache = mutable.HashMap[String , RDD[String]]()
 
 
 
 
+  def clear(): Unit = {
+    rddCache.values.foreach(_.unpersist(false))
+    rddCache.clear()
+  }
 
 
 
@@ -194,7 +202,6 @@ case class PFileDesc(file_name: String,
     }
 
   }
-
 
   def getChunksNum: Int = chunkPFArray.length
 

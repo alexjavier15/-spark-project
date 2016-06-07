@@ -523,6 +523,12 @@ object SQLConf {
       " plan",
     isPublic = false)
 
+  val CSV_CACHING = booleanConf("spark.sql.csvCaching",
+    defaultValue = Some(false),
+    doc = "When true, csv file rdd are cached" +
+      " for future utilisation",
+    isPublic = false)
+
   val MJOIN_SAMPLING_ENABLED = booleanConf("spark.sql.mjoin.sampling",
     defaultValue = Some(false),
     doc = "When true, the mjoin logic uses sampling in order to choose" +
@@ -659,6 +665,7 @@ class SQLConf extends Serializable with CatalystConf with ParserConf with Loggin
   def supportSQL11ReservedKeywords: Boolean = getConf(PARSER_SUPPORT_SQL11_RESERVED_KEYWORDS)
 
   def mJoinEnabled: Boolean = getConf(MJOIN_ENABLED)
+  def csvCacheEnabled: Boolean = getConf(CSV_CACHING)
 
   def mJoinSamplingEnabled: Boolean = getConf(MJOIN_SAMPLING_ENABLED)
   def iteratedHashJoinEnabled: Boolean = getConf(HASHJOIN_ITERATOR_ENABLED)
