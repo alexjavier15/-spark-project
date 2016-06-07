@@ -43,7 +43,7 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
   var uniqueID : Int = pFileDesc.hashCode()
 
   def hasParent : Boolean = parent!=null
-    
+
   def isChild(relation : HadoopPfRelation): Boolean = hasParent && parent == relation
   def  splitHadoopPfRelation(): Seq[HadoopPfRelation] = {
 
@@ -150,7 +150,9 @@ case class PFileDesc(file_name: String,
     chunkDesc
   })
 
-  val structType: Option[StructType] =
+  val structType: Option[StructType] =readStruct()
+
+
   private def readStruct(): Option[StructType]={
     implicit val formats = new Serializable {DefaultFormats}
 
@@ -161,6 +163,7 @@ case class PFileDesc(file_name: String,
         case _ => None
       }
     source.close()
+    struct
 
   }
 
