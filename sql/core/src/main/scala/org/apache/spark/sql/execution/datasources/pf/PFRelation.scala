@@ -1,9 +1,5 @@
 package org.apache.spark.sql.execution.datasources.pf
 
-import java.io.{File, PrintStream}
-import java.net.{InetAddress, Socket}
-import java.nio.file.{FileSystem, FileSystems}
-
 import org.apache.hadoop.fs.Path
 import org.apache.spark.SparkContext
 import org.apache.spark.deploy.SparkHadoopUtil
@@ -16,7 +12,6 @@ import org.json4s.DefaultFormats
 import org.json4s.jackson.JsonMethods._
 
 import scala.collection.mutable
-import scala.io.BufferedSource
 import scala.io.Source._
 
 /**
@@ -43,6 +38,12 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
   var uniqueID : Int = pFileDesc.hashCode()
 
   def hasParent : Boolean = parent!=null
+    println("Initiating HaddopPfRelation  ")
+    pFLocation.allFiles().foreach(f=>{
+      import sys.process._
+      "xattr -l "+ f.getPath.toString.substring(5) !
+      })
+
 
   def isChild(relation : HadoopPfRelation): Boolean = hasParent && parent == relation
   def  splitHadoopPfRelation(): Seq[HadoopPfRelation] = {
@@ -100,6 +101,21 @@ protected[sql] object PFRelation extends Logging {
   val REMOTE_PORT = 9999
   val REMOTE_ADRESS = "localhost"
 
+
+
+
+
+
+
+
+  def readPFileInfo(path: String): PFileDesc = {
+    implicit val formats = DefaultFormats
+
+
+    extractPFMetadata[PFileDesc](path)
+
+
+  }
 
   def extractPFMetadata[A: Manifest](path: String): A = {
 
@@ -159,9 +175,9 @@ case class PFileDesc(file_name: String,
     val source =fromFile(schema_location)
 
     val struct =DataType.fromJson(source.getLines.reduce(_ + _)) match {
-        case e: StructType => Some(e)
-        case _ => None
-      }
+      case e: StructType => Some(e)
+      case _ => None
+    }
     source.close()
     struct
 
