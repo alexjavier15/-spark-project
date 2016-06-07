@@ -18,6 +18,7 @@
 package org.apache.spark.sql.execution.joins
 
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.catalyst.{InternalRow, expressions}
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans._
@@ -25,6 +26,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReturnAnswer}
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreeNode
+import org.apache.spark.sql.execution.aggregate.TungstenAggregate
 import org.apache.spark.sql.execution.{ScalarSubquery, _}
 import org.apache.spark.sql.execution.datasources.LogicalRelation
 import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
@@ -305,6 +307,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
           val transformedPlan = sqlContext.sessionState.planner.plan(
             plan  transformUp {
+
               case relation  @ LogicalRelation(h: HadoopPfRelation, _, _)=>
                 val ds  = subplan(relation.semanticHash)
                 assert(ds.semanticHash == relation.semanticHash)
@@ -316,6 +319,8 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
           attribute -> transformedPlan
         }
       }
+
+
 
       def getCardinality(sparkPlan : SparkPlan) : Long ={
 
@@ -335,7 +340,10 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       val distinctsAttrMap = columnStatPlans.map {
         case (attribute ,plan) => {
           plan.resetChildrenMetrics
-          (plan ,attribute.semanticHash(), attribute) -> (EnsureRequirements(this.sqlContext.conf)(plan).execute().count() ,getCardinality(plan))
+          val  rdd = EnsureRequirements(this.sqlContext.conf)(plan).execute()
+          val count = rdd.count()
+          rdd.unpersist(false)
+          (plan ,attribute.semanticHash(), attribute) -> (count ,getCardinality(plan))
         }
       }
       val columnsStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => h -> s }
