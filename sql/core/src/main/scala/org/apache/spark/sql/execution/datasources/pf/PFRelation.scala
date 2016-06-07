@@ -43,13 +43,7 @@ class HadoopPfRelation(override val sqlContext: SQLContext,
   var uniqueID : Int = pFileDesc.hashCode()
 
   def hasParent : Boolean = parent!=null
-    println("Initiating HaddopPfRelation  ")
-    pFLocation.allFiles().foreach(f=>{
-      import sys.process._
-      "xattr -l "+ f.getPath.toString.substring(5) !
-      })
-
-
+    
   def isChild(relation : HadoopPfRelation): Boolean = hasParent && parent == relation
   def  splitHadoopPfRelation(): Seq[HadoopPfRelation] = {
 
@@ -106,80 +100,6 @@ protected[sql] object PFRelation extends Logging {
   val REMOTE_PORT = 9999
   val REMOTE_ADRESS = "localhost"
 
-  var connector = new Socket()
-
-  def executeCommand(command: String): Array[String] = {
-
-
-    val in = getInputChannel()
-    val out = getOutputChannel()
-
-    out.println(command)
-    out.flush
-
-    val reply = in.getLines().toArray
-    reply.foreach(x => println("Read :" + x))
-
-    out.println("END:NOW")
-
-    out.flush
-    connector.close
-    reply
-
-  }
-
-  def getNextChunkID(): Int = {
-    val out = getOutputChannel()
-    out.println(NEXT_CHUNK)
-    val in = getInputChannel()
-    in.getLines().next().toInt
-
-  }
-
-  private def getInputChannel(): BufferedSource = {
-
-    if (needToReconnect) {
-      connectToPelicanServer()
-      println("Need To Reconnect  IN!")
-    }
-
-    new BufferedSource(connector.getInputStream())
-
-
-  }
-
-  def needToReconnect = connector.isClosed || !connector.isConnected
-
-  // Execute a command and return the reply
-
-  def connectToPelicanServer(): Unit = {
-
-    if (!connector.isClosed)
-      connector.close
-
-    connector = new Socket(InetAddress.getByName(REMOTE_ADRESS), REMOTE_PORT)
-
-
-  }
-
-  private def getOutputChannel(): PrintStream = {
-    if (needToReconnect) {
-      println("Need To Reconnect OUT!")
-      connectToPelicanServer()
-    }
-
-    new PrintStream(connector.getOutputStream())
-
-  }
-
-  def readPFileInfo(path: String): PFileDesc = {
-    implicit val formats = DefaultFormats
-
-
-    extractPFMetadata[PFileDesc](path)
-
-
-  }
 
   def extractPFMetadata[A: Manifest](path: String): A = {
 
@@ -229,11 +149,18 @@ case class PFileDesc(file_name: String,
 
     chunkDesc
   })
-  implicit val formats = new Serializable {DefaultFormats}
-  val structType: Option[StructType] = DataType.fromJson(fromFile(schema_location).getLines.reduce(_ + _)) match {
-    case e: StructType => Some(e)
-    case _ => None
 
+  val structType: Option[StructType] =
+  private def readStruct(): Option[StructType]={
+    implicit val formats = new Serializable {DefaultFormats}
+
+    val source =fromFile(schema_location)
+
+    val struct =DataType.fromJson(source.getLines.reduce(_ + _)) match {
+        case e: StructType => Some(e)
+        case _ => None
+      }
+    source.close()
 
   }
 
