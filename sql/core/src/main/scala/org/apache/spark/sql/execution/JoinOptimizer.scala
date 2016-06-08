@@ -3,7 +3,7 @@ package org.apache.spark.sql.execution
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.expressions.{And, EquivalencesClass, Expression, NamedExpression, PredicateHelper}
-import org.apache.spark.sql.catalyst.optimizer.MJoinGeneralOptimizer
+import org.apache.spark.sql.catalyst.optimizer.{MJjoinColumnPrunning, MJoinGeneralOptimizer}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.plans.{Inner, logical}
 import org.apache.spark.sql.execution.datasources.pf.HadoopPfRelation
@@ -21,6 +21,7 @@ object JoinOptimizer {
   var joinOptimizer: JoinOptimizer = null
 
   def apply(originPlan: LogicalPlan, sqlContext: SQLContext): JoinOptimizer = {
+    println("Executing MJOIN")
     if (joinOptimizer == null || joinOptimizer.originPlan != originPlan)
       joinOptimizer = new JoinOptimizer(gOptimizer.execute(originPlan), sqlContext)
     joinOptimizer
@@ -39,6 +40,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   lazy val mJoinLogical: Option[LogicalPlan] = analyzeWithMJoin()
   lazy val columnStatPlans = buildColumnStatPlans()
   lazy val joinAlternatives = buildJoinAlternatives()
+  val projectionOptimizer = new MJjoinColumnPrunning
   lazy private val (baseRelations, originalConditions): (Seq[LogicalPlan], Seq[Expression]) =
     extractJoins(splitConjunctivePredicates).
       getOrElse((Seq(), Seq()))
@@ -90,12 +92,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       case logical.Filter(filterCondition, j@Join(left, right, Inner, joinCondition)) =>
         val (plans, conditions) = flattenJoin(j, f)
         (plans, conditions ++ f(filterCondition))
-      case logical.Project(fields, child) => flattenJoin(child, f)
-      case logical.Aggregate(a, b, child) =>
-        flattenJoin(child, f)
-      case logical.GlobalLimit(_, child) => flattenJoin(child, f)
-      case logical.LocalLimit(_, child) => flattenJoin(child, f)
-      case logical.Sort(_, _, child) => flattenJoin(child, f)
+      case node : logical.UnaryNode  => flattenJoin(node.child, f)
       case _ => (Seq(plan), Seq())
     }
 
@@ -104,12 +101,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
         Some(flattenJoin(fil, f))
       case j@logical.Join(_, _, Inner, _) =>
         Some(flattenJoin(j, f))
-      case p@logical.Project(fields, child) =>
-        Some(flattenJoin(child, f))
-      case o@logical.Aggregate(_, _, child) =>
-        Some(flattenJoin(o, f))
-      case l1@logical.GlobalLimit(_, child) => Some(flattenJoin(l1, f))
-      case l2@logical.LocalLimit(_, child) => Some(flattenJoin(l2, f))
+      case node : logical.UnaryNode => Some(flattenJoin(node, f))
       case _ => None
     }
 
@@ -204,8 +196,10 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   private def analyzeWithMJoin(): Option[LogicalPlan] = {
 
-    if (!sqlContext.conf.mJoinEnabled || inferedPlans == Nil)
+    if (!sqlContext.conf.mJoinEnabled || inferedPlans == Nil){
+      println("inferedPlans empty or mjoin : "+ sqlContext.conf.mJoinEnabled)
       None
+    }
     else {
       val optimzedOriginal = sqlContext.sessionState.optimizer.execute(originPlan)
       val rootJoin = findRootJoin(optimzedOriginal)
@@ -249,7 +243,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
     val otherFilters = _otherConditions.reduceLeftOption(And)
 
-    otherFilters match {
+    val subplan =otherFilters match {
       case Some(f) =>
         val filter = logical.Filter(otherFilters.get, joined)
         appendPlan[logical.Filter](originPlan, filter)
@@ -257,6 +251,8 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
         appendPlan[logical.Join](originPlan, joined)
     }
 
+
+    projectionOptimizer.execute(subplan)
 
 
   }

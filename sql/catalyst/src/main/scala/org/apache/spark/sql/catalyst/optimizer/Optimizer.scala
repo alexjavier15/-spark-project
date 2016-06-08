@@ -109,6 +109,10 @@ abstract class Optimizer extends RuleExecutor[LogicalPlan] {
     }
   }
 }
+class MJjoinColumnPrunning extends RuleExecutor[LogicalPlan] {
+  def batches: Seq[Batch] = {Batch("Operator Optimizations", FixedPoint(100),ColumnPruning) :: Nil}
+
+}
 class MJoinGeneralOptimizer extends RuleExecutor[LogicalPlan] {
   def batches: Seq[Batch] = {
     // Technically some of the rules in Finish Analysis are not optimizer rules and belong more

@@ -248,8 +248,24 @@ case class HashPartitioning(expressions: Seq[Expression], numPartitions: Int)
     case _ => false
   }
 
+
+  /**
+    * Returns true when two expressions will always compute the same result, even if they differ
+    * cosmetically (i.e. capitalization of names in attributes may be different).
+    *
+    * See [[Canonicalize]] for more details.
+    */
+
+  /**
+    * Returns true when two expressions will always compute the same result, even if they differ
+    * cosmetically (i.e. capitalization of names in attributes may be different).
+    *
+    * See [[Canonicalize]] for more details.
+    */
+
+
   override def compatibleWith(other: Partitioning): Boolean = other match {
-    case o: HashPartitioning => this.semanticEquals(o)
+    case o: HashPartitioning  => this.semanticEquals(o)
     case _ => false
   }
 
