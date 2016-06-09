@@ -55,6 +55,7 @@ trait NamedExpression extends Expression {
 
   def name: String
   def exprId: ExprId
+  var distincts : Long = 1
 
   /**
    * Returns a dot separated fully qualified name for this attribute.  Given that there can be

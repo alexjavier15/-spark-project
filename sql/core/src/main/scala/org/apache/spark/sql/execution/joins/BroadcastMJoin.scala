@@ -34,6 +34,7 @@ import org.apache.spark.util.ThreadUtils
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.util.{Success, Failure}
 
 /**
   * Performs an inner hash join of two child relations.  When the output RDD of this operator is
@@ -287,6 +288,39 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 */
   }
 
+  def getCardinality(sparkPlan : SparkPlan) : Long ={
+
+    sparkPlan match {
+      case f @ Filter(_,_) => f.getOutputRows
+      case u : UnaryNode => getCardinality(u.child)
+      case scan @ DataSourceScan(_,_,_,_,_) => scan.getOutputRows
+      case _ => throw  new UnsupportedOperationException(" Could not get cardinality")
+
+    }
+
+  }
+
+  private def updateCardialities(attribute: NamedExpression, executor: ExecutionContext, plan: SparkPlan , rdd :RDD[InternalRow]): Future[Long] = {
+
+
+    val future = Future {
+      plan.execute().count()
+    }(executor)
+
+    future.onComplete {
+      case Success(count) =>
+        attribute.distincts = count
+        val rows = getCardinality(plan)
+        SelectivityPlan._selectivityPlanNodes(plan.semanticHash).setRows(rows)
+        rdd.unpersist(false)
+      case Failure(t) =>
+        rdd.unpersist(false)
+        println("An error has occured: " + t.getMessage)
+    }(executor)
+    future
+
+  }
+
   private def optimizeJoinOrderFromELS(): Unit ={
     sparkContext.withScope {
 
@@ -316,41 +350,21 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       }
 
 
+      val executor = ExecutionContext.fromExecutorService(
+        ThreadUtils.newDaemonCachedThreadPool("Analisis-exchange", 128))
 
-      def getCardinality(sparkPlan : SparkPlan) : Long ={
-
-        sparkPlan match {
-          case f @ Filter(_,_) => f.getOutputRows
-          case u : UnaryNode => getCardinality(u.child)
-          case scan @ DataSourceScan(_,_,_,_,_) => scan.getOutputRows
-          case _ => throw  new UnsupportedOperationException(" Could not get cardinality")
-
-        }
-
-      }
      val futures =  columnStatPlans.map{
         case (attribute ,plan) => {
           plan.resetChildrenMetrics
-          (attribute,plan) -> Future{EnsureRequirements(this.sqlContext.conf)(plan).execute().count()}((ExecutionContext.fromExecutorService(
-            ThreadUtils.newDaemonCachedThreadPool("Analisis-exchange", 128))))
+          val toExecute = EnsureRequirements(sqlContext.conf)(plan)
+           updateCardialities(attribute,executor,toExecute,toExecute.execute())
         }
       }
 
-      val distinctsAttrMap = futures.map {
-        case ((attribute ,plan), future) => {
-          plan.resetChildrenMetrics
-          (plan ,attribute.semanticHash(), attribute) -> (Await.result(future,Duration.Inf) ,getCardinality(plan))
-        }
-      }
-      val columnsStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => h -> s }
-      val cardinalityStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => p -> c }
-      SelectivityPlan._filterStats.values.foreach{
-        f => f.computeSelectivityFromColumn(columnsStats )
-      }
-      cardinalityStats.foreach{
-        case (p,c) => SelectivityPlan._selectivityPlanNodes(p.semanticHash).setRows(c)
+    futures.foreach(
+      f => Await.result(f, Duration.Inf)
+      )
 
-      }
      sqlContext.conf.setConfString("spark.sql.csvCaching", "false")
      updateSelectivities()
       PFRelation.clear()
@@ -370,7 +384,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 case class FilterStatInfo( filter : Expression
                            , children : Seq[FilterStatInfo] = Seq() ) extends Serializable {
 
-  private[this] var _selectivity : Double  = Double.MinValue
+  private[this] val _selectivity : Double  = 1.0/filter.references.map(_.distincts).max
   private[this] val  _derived : HashSet[FilterStatInfo] = HashSet[FilterStatInfo]()
   private val output : AttributeSet=     AttributeSet(expressions)
 
@@ -392,15 +406,7 @@ case class FilterStatInfo( filter : Expression
 
   override def toString: String = filter.toString + " , [ Sel :"+ selectivity + " ]"
 
-  def setSelectivity(selectivity : Double): Unit = {
 
-    selectivity match {
-      case s if s < 0.0 => 0.0
-      case s if s > 1.0 => 1.0
-      case s if _selectivity < 0.0 => this._selectivity = s
-
-    }
-  }
 
 
 
@@ -409,17 +415,7 @@ case class FilterStatInfo( filter : Expression
     case _ => false
   }
 
-  def  computeSelectivityFromColumn(columnsStats :  Map[Int, Long] ) : Unit ={
 
-    if (children.isEmpty) {
-
-      val attrHashes = filter.references.map(_.semanticHash())
-      val colCardinalies = attrHashes.map(attr => columnsStats(attr))
-      _selectivity = 1.0 / colCardinalies.max
-
-    }else
-      children.foreach( _.computeSelectivityFromColumn(columnsStats))
-  }
 
   override def hashCode(): Int = filter.semanticHash()
 }
@@ -451,17 +447,6 @@ object SelectivityPlan {
 
 
 
-  private def updateFilterStats( qualifiedKeys : Seq[Seq[Expression]],
-                                 targetKeys: Seq[Expression],
-                                 sel : Double): Unit = {
-    val filterStatInfos = getOrCreateFilters(qualifiedKeys,targetKeys)
-    filterStatInfos foreach { fInfo =>
-      fInfo.setSelectivity(sel)
-
-    }
-
-
-  }
 
   private[this] def getOrCreateFilters( leftChildKeys : Seq[Seq[Expression]],
                                         rightKeys : Seq[Expression]) : Seq[FilterStatInfo] ={
@@ -484,34 +469,6 @@ object SelectivityPlan {
   }
   def isValidSelectivity(sel : Double ) : Boolean = sel >= 0 && sel <= 1
   def isValidRows(rows : Long ) : Boolean = rows >= 0
-
-
-
-  def updatefromExecution(sparkPlan : SparkPlan) : Unit ={
-
-    sparkPlan match {
-      case join @ ShuffledHashJoin(leftKeys,rightKeys,_,_,condition,left,right) =>
-        updatefromExecution(right)
-        updatefromExecution(left)
-        updateFilterStats(Seq(leftKeys), rightKeys,sparkPlan.selectivity())
-       /* //TODO unsafe  operation
-        val rows =  _selectivityPlanNodes(join.simpleHash).rows
-        _selectivityPlanNodesSemantic(join.semanticHash).foreach {
-          selPlan =>
-            selPlan.setRowsFromExecution(rows)
-            selPlan.setNumPartitionsFromExecution(sparkPlan.getNumPartitions)
-        }*/
-      case f@Filter(condition,child0@DataSourceScan(_, _, _, _,_)) =>
-        _selectivityPlanNodes(f.semanticHash).setRowsFromExecution(f.getOutputRows)
-
-      case u: UnaryNode => updatefromExecution(u.child)
-
-
-      case u: LeafNode => _selectivityPlanNodes(u.semanticHash).setRowsFromExecution(u.getOutputRows)
-
-    }
-
-  }
 
 
 
@@ -728,13 +685,7 @@ case class HashCondition(left : SelectivityPlan,
   }
 
   override def selectivity: Double = {
-    if(rowsFromExecution.isDefined && children.map(_.isValid).reduceLeft(_&&_)){
-      val sel = rowsFromExecution.get.asInstanceOf[Double]/ children.map(_.rows).product
-      if(condition.selectivity < 0 )
-        condition.setSelectivity(sel)
-      sel
-    }
-    else
+
     condition.selectivity
   }
 
