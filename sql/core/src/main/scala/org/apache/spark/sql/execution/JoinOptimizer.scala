@@ -201,7 +201,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       val rootJoin = findRootJoin(optimizedOriginal)
       if(rootJoin != null){
       val mJoin = logical.MJoin(rootJoin)
-      val res = appendPlan[logical.Join](optimizedOriginal, mJoin)
+      val res = appendPlan(optimizedOriginal, mJoin)
         Some(res)
       }
     else{
@@ -244,28 +244,45 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   private def optimizeSubplan(joined: LogicalPlan, conditions: Seq[Expression]): LogicalPlan = {
 
     val otherFilters = _otherConditions.reduceLeftOption(And)
-    val projectedjoin =  projectionOptimizer.execute(joined)
+)
+    val appended  = appendPlan(originPlan, joined)
+
+    val projectedJoin =  projectionOptimizer.execute(appended)
+
     val subplan =otherFilters match {
       case Some(f) =>
-
-        val filtered = logical.Filter(f,projectedjoin)
-       appendPlan[logical.Filter](originPlan, filtered)
+        val rootJoin = findRootJoin(projectedJoin)
+        val filtered = logical.Filter(f,rootJoin)
+        appendPlanFilter(projectedJoin, filtered)
 
       case None =>
-        appendPlan[logical.Join](originPlan, projectedjoin)
+        projectedJoin
     }
 
-    println (subplan)
 
     subplan
 
 
   }
 
-  private def appendPlan[B](root: LogicalPlan, plan: LogicalPlan): LogicalPlan = {
+  private def appendPlanFilter(root: LogicalPlan, plan: LogicalPlan): LogicalPlan = {
+    root match {
+      case j @ logical.Filter(_,_)  =>
+        plan
+      case node: logical.UnaryNode =>
+        node.withNewChildren(Seq(appendPlanFilter(node.child, plan)))
+      case others => throw new IllegalArgumentException("Not found :" + plan.nodeName + " Only UnaryNode must be above a Join " + others.nodeName)
+    }
+
+  }
+
+
+
+  private def appendPlan(root: LogicalPlan, plan: LogicalPlan): LogicalPlan = {
+
 
     root match {
-      case j: B => plan
+      case j: logical.Join  => plan
       case node: logical.UnaryNode =>
         node.withNewChildren(Seq(appendPlan(node.child, plan)))
       case others => throw new IllegalArgumentException("Not found :" + plan.nodeName + " Only UnaryNode must be above a Join " + others.nodeName)
