@@ -110,7 +110,13 @@ abstract class Optimizer extends RuleExecutor[LogicalPlan] {
   }
 }
 class MJjoinColumnPrunning extends RuleExecutor[LogicalPlan] {
-  def batches: Seq[Batch] = {Batch("Operator Optimizations", FixedPoint(100),ColumnPruning) :: Nil}
+  def batches: Seq[Batch] = {Batch("Operator Optimizations", FixedPoint(100),
+    PushPredicateThroughJoin,
+    PushPredicateThroughProject,
+    ColumnPruning,
+    CollapseProject,
+    CombineFilters
+  ) :: Nil}
 
 }
 class MJoinGeneralOptimizer extends RuleExecutor[LogicalPlan] {
@@ -210,6 +216,7 @@ class MJoinOrderingOptimizer extends RuleExecutor[LogicalPlan] {
   * To ensure extendability, we leave the standard rules in the abstract optimizer rules, while
   * specific rules go to the subclasses
   */
+object MJjoinColumnPrunning extends MJjoinColumnPrunning
 object DefaultOptimizer extends Optimizer
 object MJoinGeneralOptimizer extends MJoinGeneralOptimizer
 object MJoinOrderingOptimizer extends MJoinOrderingOptimizer

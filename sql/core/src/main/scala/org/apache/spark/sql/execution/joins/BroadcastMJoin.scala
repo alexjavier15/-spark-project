@@ -527,6 +527,11 @@ object SelectivityPlan {
         buildHashJoinCondition(Seq(),join)
       case u: logical.UnaryNode => u match {
 
+        case p1 @logical.Project( c,f@logical.Filter(condition,  p2@logical.Project(_, l @LogicalRelation(h: HadoopPfRelation, a, b))) ) =>
+          val semanticHashCode = f.semanticHash
+          _selectivityPlanNodes.getOrElseUpdate(semanticHashCode, {
+            ScanCondition(l.output, Some(condition), semanticHashCode, p1.output)
+          })
 
         case f@logical.Filter(condition,  p@logical.Project(_, l @LogicalRelation(h: HadoopPfRelation, a, b))) =>
           val semanticHashCode = f.semanticHash

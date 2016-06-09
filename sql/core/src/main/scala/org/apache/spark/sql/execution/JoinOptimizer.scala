@@ -245,23 +245,15 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
     val otherFilters = _otherConditions.reduceLeftOption(And)
 
-    val appended  = appendPlan(originPlan, joined)
-
-    val projectedJoin =  projectionOptimizer.execute(appended)
-
     val subplan =otherFilters match {
       case Some(f) =>
-        val rootJoin = findRootJoin(projectedJoin)
-        val filtered = logical.Filter(f,rootJoin)
-        appendPlanFilter(projectedJoin, filtered)
-
+        val filter = logical.Filter(otherFilters.get, joined)
+        appendPlanFilter(originPlan, filter)
       case None =>
-        projectedJoin
+        appendPlan(originPlan, joined)
     }
 
-
-    subplan
-
+    projectionOptimizer.execute(subplan)
 
   }
 
