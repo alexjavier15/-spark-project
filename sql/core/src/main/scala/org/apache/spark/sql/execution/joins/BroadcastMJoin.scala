@@ -366,12 +366,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
     futures.foreach(
       f => Await.result(f, Duration.Inf)
       )
-
-      SelectivityPlan._filterStats.values.foreach( p=>{
-
-        p.filter.references.foreach(o =>println(o.distincts))
-
-      })
+      
      sqlContext.conf.setConfString("spark.sql.csvCaching", "false")
      sqlContext.conf.setConfString("spark.sql.mjoin", "true")
 
