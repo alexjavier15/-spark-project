@@ -29,8 +29,11 @@ import org.apache.spark.sql.execution.datasources.LogicalRelation
 import org.apache.spark.sql.execution.datasources.pf.{HadoopPfRelation, PFRelation}
 import org.apache.spark.sql.execution.exchange.EnsureRequirements
 import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.util.ThreadUtils
 
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 /**
   * Performs an inner hash join of two child relations.  When the output RDD of this operator is
@@ -123,14 +126,6 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
   private def updateSelectivities(): Unit = {
 
 
-    logInfo("****Selectivity Plans****")
-    SelectivityPlan._selectivityPlanRoots.map{
-      case (x,y ) => y.relString
-
-    }.foreach{
-      p => logInfo(p.toString)
-
-    }
     val validPlans = SelectivityPlan._selectivityPlanRoots.filter{
       case (hc,selPlan)  =>selPlan.isValid
       case _ => false
@@ -146,7 +141,6 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       }
     logInfo("****Min  plan****")
     logInfo(bestPlan.toString())
-    System.exit(0)
     val oldPlan = _bestPlan
     val _bestLogical = _subplansMap(bestPlan._1)
 
@@ -334,14 +328,18 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
         }
 
       }
-
-
-
-
-      val distinctsAttrMap = columnStatPlans.map {
+     val futures =  columnStatPlans.map{
         case (attribute ,plan) => {
           plan.resetChildrenMetrics
-          (plan ,attribute.semanticHash(), attribute) -> (EnsureRequirements(this.sqlContext.conf)(plan).execute().count() ,getCardinality(plan))
+          (attribute,plan) -> Future{EnsureRequirements(this.sqlContext.conf)(plan).execute().count()}((ExecutionContext.fromExecutorService(
+            ThreadUtils.newDaemonCachedThreadPool("Analisis-exchange", 128))))
+        }
+      }
+
+      val distinctsAttrMap = futures.map {
+        case ((attribute ,plan), future) => {
+          plan.resetChildrenMetrics
+          (plan ,attribute.semanticHash(), attribute) -> (Await.result(future,Duration.Inf) ,getCardinality(plan))
         }
       }
       val columnsStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => h -> s }

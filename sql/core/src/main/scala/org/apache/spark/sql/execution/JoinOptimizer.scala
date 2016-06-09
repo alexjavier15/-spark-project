@@ -46,8 +46,8 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
       getOrElse((Seq(), Seq()))
   lazy private val _otherConditions = HashSet[Expression]()
   lazy private val eqClasses = HashSet[EquivalencesClass]()
-  val chunkedRels = findChunkedBaseRelPlans()
-  val inferedPlans = doPermutations()
+  lazy val chunkedRels = findChunkedBaseRelPlans()
+  lazy val inferedPlans = doPermutations()
   private val all_joins = HashMap[Int, ListBuffer[LogicalPlan]]()
   private var originalOrder: Option[LogicalPlan] = None
 
@@ -196,17 +196,19 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
   private def analyzeWithMJoin(): Option[LogicalPlan] = {
 
-    if (!sqlContext.conf.mJoinEnabled || inferedPlans == Nil){
-      println("inferedPlans empty or mjoin : "+ sqlContext.conf.mJoinEnabled)
-      None
-    }
-    else {
-      val optimzedOriginal = sqlContext.sessionState.optimizer.execute(originPlan)
-      val rootJoin = findRootJoin(optimzedOriginal)
+
+      val optimizedOriginal = sqlContext.sessionState.optimizer.execute(originPlan)
+      val rootJoin = findRootJoin(optimizedOriginal)
+      if(rootJoin != null){
       val mJoin = logical.MJoin(rootJoin)
-      val res = appendPlan[logical.Join](optimzedOriginal, mJoin)
-      Some(res)
-    }
+      val res = appendPlan[logical.Join](optimizedOriginal, mJoin)
+        Some(res)
+      }
+    else{
+        Some(optimizedOriginal)
+      }
+
+
   }
 
   private def optimizePlans(plans: Seq[LogicalPlan]): Seq[LogicalPlan] = plans map sqlContext.sessionState.optimizer.execute
@@ -382,7 +384,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
 
       case j@Join(_, _, _, _) => j
       case node: logical.UnaryNode => findRootJoin(node.child)
-      case _ => throw new IllegalArgumentException("Only UnaryNode must be above a Join")
+      case _ => null
     }
 
   }
