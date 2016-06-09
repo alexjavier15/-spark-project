@@ -253,6 +253,15 @@ case class Join(
     condition: Option[Expression])
   extends BinaryNode with PredicateHelper {
 
+  override def mjoinStatistics: Statistics = {
+
+    if(_mjoinStatistics == 0)
+      statistics
+    else
+      Statistics(sizeInBytes = _mjoinStatistics)
+
+  }
+
   override def simpleHash: Int = {
     var h = 17
     h = h * 37 + left.simpleHash

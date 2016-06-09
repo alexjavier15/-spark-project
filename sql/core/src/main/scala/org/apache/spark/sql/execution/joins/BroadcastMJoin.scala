@@ -21,7 +21,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans._
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Statistics}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreeNode
 import org.apache.spark.sql.execution._
@@ -105,7 +105,6 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
 
     val rddBuffer = ArrayBuffer[RDD[InternalRow]]()
-    sqlContext.setConf("spark.sql.mjoin", "false")
     var executedRDD: RDD[InternalRow] = null
     var duration: Long = 0L
     var tested = false
@@ -143,12 +142,32 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
     logInfo(bestPlan.toString())
     val oldPlan = _bestPlan
     val _bestLogical = _subplansMap(bestPlan._1)
+
     found =  bestPlan._1 != _bestPlan.semanticHash
 
-    val queryExecution = new QueryExecution(sqlContext, _bestLogical)
+    val bestOptimized =sqlContext.sessionState.optimizer.execute(_bestLogical) transformDown {
 
-    _bestPlan = sqlContext.sessionState.planner.
-      plan(sqlContext.sessionState.optimizer.execute(_bestLogical)).next
+      case l @LogicalRelation(h: HadoopPfRelation, a, b) =>
+
+        val nodeOption = SelectivityPlan._selectivityPlanNodes.get(l.semanticHash)
+        if(nodeOption.isDefined){
+          val node = nodeOption.get
+          l._mjoinStatistics = node.rows * node.rowSize()
+        }
+        l
+
+      case join @ logical.Join(_,_,_,_) =>
+
+        val nodeOption = SelectivityPlan._selectivityPlanNodes.get(join.simpleHash)
+        if(nodeOption.isDefined){
+          val node = nodeOption.get
+          join._mjoinStatistics =node.rows * node.rowSize()
+        }
+        join
+
+    }
+     _bestPlan = sqlContext.sessionState.planner.
+      plan(bestOptimized).next
     logInfo("****New Optimized plan****")
     logInfo(_bestPlan.toString())
     logDebug("****SelectivityPlan filters****")
@@ -321,7 +340,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       val columnsStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => h -> s }
       val cardinalityStats = distinctsAttrMap.map{case ( (p,h , a) , (s, c)) => p -> c }
       SelectivityPlan._filterStats.values.foreach{
-        f => f.computeSelctivityFromColumn(columnsStats )
+        f => f.computeSelectivityFromColumn(columnsStats )
       }
       cardinalityStats.foreach{
         case (p,c) => SelectivityPlan._selectivityPlanNodes(p.semanticHash).setRows(c)
@@ -385,7 +404,7 @@ case class FilterStatInfo( filter : Expression
     case _ => false
   }
 
-  def  computeSelctivityFromColumn( columnsStats :  Map[Int, Long] ) : Unit ={
+  def  computeSelectivityFromColumn(columnsStats :  Map[Int, Long] ) : Unit ={
 
     if (children.isEmpty) {
 
@@ -394,7 +413,7 @@ case class FilterStatInfo( filter : Expression
       _selectivity = 1.0 / colCardinalies.max
 
     }else
-      children.foreach( _.computeSelctivityFromColumn(columnsStats))
+      children.foreach( _.computeSelectivityFromColumn(columnsStats))
   }
 
   override def hashCode(): Int = filter.semanticHash()
@@ -728,8 +747,7 @@ case class HashCondition(left : SelectivityPlan,
 
 
   def compatibleWithLeft(other: SelectivityPlan): Boolean = other match {
-    case o: HashCondition   =>
-        true
+    case o: HashCondition   => true
     case _ => false
 
 

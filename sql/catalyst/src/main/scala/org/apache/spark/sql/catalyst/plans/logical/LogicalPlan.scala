@@ -85,7 +85,18 @@ abstract class LogicalPlan extends QueryPlan[LogicalPlan] with Logging {
       case p => p.transformExpressions(r)
     }
   }
+  var _mjoinStatistics : BigInt = 0
 
+  def mjoinStatistics : Statistics = {
+
+    if (_mjoinStatistics == 0) {
+      Statistics(sizeInBytes = children.map(_.mjoinStatistics.sizeInBytes).product)
+    }
+    else{
+    Statistics(sizeInBytes = _mjoinStatistics)
+    }
+
+  }
   /**
    * Computes [[Statistics]] for this plan. The default implementation assumes the output
    * cardinality is the product of of all child plan's cardinality, i.e. applies in the case
@@ -94,6 +105,7 @@ abstract class LogicalPlan extends QueryPlan[LogicalPlan] with Logging {
    * [[LeafNode]]s must override this.
    */
   def statistics: Statistics = {
+
     if (children.size == 0) {
       throw new UnsupportedOperationException(s"LeafNode $nodeName must implement statistics.")
     }
@@ -318,6 +330,7 @@ abstract class UnaryNode extends LogicalPlan {
   override protected def validConstraints: Set[Expression] = child.constraints
 
   override def statistics: Statistics = {
+
     // There should be some overhead in Row object, the size should not be zero when there is
     // no columns, this help to prevent divide-by-zero error.
     val childRowSize = child.output.map(_.dataType.defaultSize).sum + 8
@@ -331,6 +344,7 @@ abstract class UnaryNode extends LogicalPlan {
     }
     Statistics(sizeInBytes = sizeInBytes)
   }
+
 }
 
 /**

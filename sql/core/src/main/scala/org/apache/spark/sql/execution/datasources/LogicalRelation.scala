@@ -51,6 +51,16 @@ case class LogicalRelation(
     h
 
   }
+
+  override def mjoinStatistics: Statistics = {
+
+  if(_mjoinStatistics == 0)
+    statistics
+  else
+    Statistics(sizeInBytes = _mjoinStatistics)
+
+  }
+
   override val output: Seq[AttributeReference] = {
     val attrs = relation.schema.toAttributes
 

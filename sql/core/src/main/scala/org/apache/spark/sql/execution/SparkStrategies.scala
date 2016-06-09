@@ -143,8 +143,8 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
 
         // --- Inner joins --------------------------------------------------------------------------
         case ExtractEquiJoinKeys(Inner, leftKeys, rightKeys, condition, left, right)
-          if (conf.iteratedHashJoinEnabled) =>
-          val buildSide = BuildRight
+          if conf.iteratedHashJoinEnabled =>
+
           /* if (right.statistics.sizeInBytes <= left.statistics.sizeInBytes) {
              BuildRight
            } else {
@@ -161,6 +161,26 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
               return Seq(optimizedPlan.get)
 
           )}*/
+
+          val buildSide = if (conf.mJoinEnabled) {
+            println("r :" +right.mjoinStatistics.sizeInBytes + "l  " + left.mjoinStatistics.sizeInBytes)
+            if (right.mjoinStatistics.sizeInBytes <= left.mjoinStatistics.sizeInBytes) {
+
+              BuildRight
+            } else {
+              BuildLeft
+            }
+          }
+
+          else {
+            if (right.statistics.sizeInBytes <= left.statistics.sizeInBytes) {
+              BuildRight
+            } else {
+              BuildLeft
+            }
+
+          }
+
           val res = joins.ShuffledHashJoin(
             leftKeys, rightKeys, Inner, buildSide, condition, planLater(left), planLater(right))
           //SparkOptimizer.addOptimzedPlan(simpleHash, res)
