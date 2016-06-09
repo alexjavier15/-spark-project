@@ -244,25 +244,28 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   private def optimizeSubplan(joined: LogicalPlan, conditions: Seq[Expression]): LogicalPlan = {
 
     val otherFilters = _otherConditions.reduceLeftOption(And)
-
+    val projectedjoin =  projectionOptimizer.execute(joined)
     val subplan =otherFilters match {
       case Some(f) =>
-        val filter = logical.Filter(otherFilters.get, joined)
-        appendPlan[logical.Filter](originPlan, filter)
+
+        val filtered = logical.Filter(f,projectedjoin)
+       appendPlan[logical.Filter](originPlan, filtered)
+
       case None =>
-        appendPlan[logical.Join](originPlan, joined)
+        appendPlan[logical.Join](originPlan, projectedjoin)
     }
 
+    println (subplan)
 
-    projectionOptimizer.execute(subplan)
+    subplan
 
 
   }
 
-  private def appendPlan[T: ClassTag](root: LogicalPlan, plan: LogicalPlan): LogicalPlan = {
+  private def appendPlan[B](root: LogicalPlan, plan: LogicalPlan): LogicalPlan = {
 
     root match {
-      case j: T => plan
+      case j: B => plan
       case node: logical.UnaryNode =>
         node.withNewChildren(Seq(appendPlan(node.child, plan)))
       case others => throw new IllegalArgumentException("Not found :" + plan.nodeName + " Only UnaryNode must be above a Join " + others.nodeName)
