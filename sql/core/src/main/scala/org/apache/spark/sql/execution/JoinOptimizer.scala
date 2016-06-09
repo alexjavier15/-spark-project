@@ -357,7 +357,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
     def createProjection(projectList: Seq[NamedExpression], plan: LogicalPlan) = {
       projectList.map { p =>
         val analyzed = sqlContext.sessionState.analyzer
-          .execute(logical.Distinct(logical.Project(Seq(p), plan)))
+          .execute(logical.Distinct(logical.Project(Seq(p),  pruneFilters(plan))))
 
         p -> sqlContext.sessionState.optimizer.execute(analyzed)
       }
@@ -372,7 +372,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
             .map(s => s.head)
         }.toSeq
 
-        createProjection(projectList, pruneFilters(plan))
+        createProjection(projectList,plan)
       }
 
     ).toMap

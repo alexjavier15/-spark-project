@@ -133,8 +133,10 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
     }
 
-    logDebug("****SelectivityPlan filters****")
-    logDebug(SelectivityPlan._filterStats.toString())
+    logInfo("****SelectivityPlan filters****")
+    logInfo(SelectivityPlan._filterStats.toString())
+    logDebug("****SelectivityPlan roots****")
+    logDebug(SelectivityPlan._selectivityPlanRoots.toString())
     val bestPlan =validPlans.
       minBy{
         case (hc,selPlan) => selPlan.planCost()
@@ -300,11 +302,14 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
   }
 
-  private def updateCardialities(attribute: NamedExpression, executor: ExecutionContext, plan: SparkPlan , rdd :RDD[InternalRow]): Future[Long] = {
+  private def updateCardinalities(attribute: NamedExpression, executor: ExecutionContext, plan: SparkPlan ): Future[Long] = {
 
 
     val future = Future {
-      plan.execute().count()
+      val rdd = EnsureRequirements(sqlContext.conf)(plan).execute()
+      val count = rdd.count()
+      rdd.unpersist(false)
+      count
     }(executor)
 
     future.onComplete {
@@ -312,9 +317,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
         attribute.distincts = count
         val rows = getCardinality(plan)
         SelectivityPlan._selectivityPlanNodes(plan.semanticHash).setRows(rows)
-        rdd.unpersist(false)
       case Failure(t) =>
-        rdd.unpersist(false)
         println("An error has occured: " + t.getMessage)
     }(executor)
     future
@@ -331,6 +334,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       val subplan = currSubplan.map { plan => plan.semanticHash -> plan }.toMap
 
       sqlContext.conf.setConfString("spark.sql.csvCaching", "true")
+      sqlContext.conf.setConfString("spark.sql.mjoin", "false")
       val columnStatPlans = JoinOptimizer.joinOptimizer.columnStatPlans.map {
         case (attribute ,plan) => {
 
@@ -355,9 +359,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 
      val futures =  columnStatPlans.map{
         case (attribute ,plan) => {
-          plan.resetChildrenMetrics
-          val toExecute = EnsureRequirements(sqlContext.conf)(plan)
-           updateCardialities(attribute,executor,toExecute,toExecute.execute())
+           updateCardinalities(attribute,executor,plan)
         }
       }
 
@@ -365,8 +367,15 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       f => Await.result(f, Duration.Inf)
       )
 
+      SelectivityPlan._filterStats.values.foreach( p=>{
+
+        p.filter.references.foreach(o =>println(o.distincts))
+
+      })
      sqlContext.conf.setConfString("spark.sql.csvCaching", "false")
-     updateSelectivities()
+     sqlContext.conf.setConfString("spark.sql.mjoin", "true")
+
+      updateSelectivities()
       PFRelation.clear()
 
     }
@@ -384,14 +393,13 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
 case class FilterStatInfo( filter : Expression
                            , children : Seq[FilterStatInfo] = Seq() ) extends Serializable {
 
-  private[this] val _selectivity : Double  = 1.0/filter.references.map(_.distincts).max
   private[this] val  _derived : HashSet[FilterStatInfo] = HashSet[FilterStatInfo]()
   private val output : AttributeSet=     AttributeSet(expressions)
 
   def selectivity : Double = {
-    if (_selectivity < 0 && children.size > 1)
+    if (children.size > 1)
       children.map(_.selectivity).product
-    else _selectivity
+    else 1.0/filter.references.map(_.distincts).max
   }
 
   def expressions : Seq[Expression] = {
