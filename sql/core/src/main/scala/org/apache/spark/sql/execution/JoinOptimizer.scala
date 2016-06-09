@@ -244,7 +244,7 @@ class JoinOptimizer(private val originPlan: LogicalPlan, val sqlContext: SQLCont
   private def optimizeSubplan(joined: LogicalPlan, conditions: Seq[Expression]): LogicalPlan = {
 
     val otherFilters = _otherConditions.reduceLeftOption(And)
-)
+
     val appended  = appendPlan(originPlan, joined)
 
     val projectedJoin =  projectionOptimizer.execute(appended)
