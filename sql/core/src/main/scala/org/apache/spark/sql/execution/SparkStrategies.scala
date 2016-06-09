@@ -163,7 +163,6 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           )}*/
 
           val buildSide = if (conf.mJoinEnabled) {
-            println("r :" +right.mjoinStatistics.sizeInBytes + "l  " + left.mjoinStatistics.sizeInBytes)
             if (right.mjoinStatistics.sizeInBytes <= left.mjoinStatistics.sizeInBytes) {
 
               BuildRight

@@ -123,14 +123,20 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
   private def updateSelectivities(): Unit = {
 
 
+    logInfo("****Selectivity Plans****")
+    SelectivityPlan._selectivityPlanRoots.map{
+      case (x,y ) => y.relString
 
-    logDebug("****Selectivity Plans****")
-    logDebug(SelectivityPlan._selectivityPlanRoots.toString())
+    }.foreach{
+      p => logInfo(p.toString)
+
+    }
     val validPlans = SelectivityPlan._selectivityPlanRoots.filter{
       case (hc,selPlan)  =>selPlan.isValid
       case _ => false
 
     }
+
     logDebug("****SelectivityPlan filters****")
     logDebug(SelectivityPlan._filterStats.toString())
     val bestPlan =validPlans.
@@ -140,6 +146,7 @@ case class BroadcastMJoin(child: SparkPlan)  extends UnaryNode {
       }
     logInfo("****Min  plan****")
     logInfo(bestPlan.toString())
+    System.exit(0)
     val oldPlan = _bestPlan
     val _bestLogical = _subplansMap(bestPlan._1)
 
@@ -649,6 +656,7 @@ abstract class SelectivityPlan(output : Seq[NamedExpression])
   }
 
   /** String representation of this node without any children */
+  def relString : String = s"[${output.head}, cost:$planCost] ${children.map(_.relString)} ".trim
   override def simpleString: String = s"$nodeName args[$argString] rows:$rows size: $rowSize cost:$planCost sel:$selectivity isValid:$isValid".trim
 }
 
@@ -680,7 +688,7 @@ case class ScanCondition( outputSet : Seq[Attribute],
   * Returns a Seq of the children of this node.
   * Children should not change. Immutability required for containsChild optimization
   */
-  override def children: Seq[ScanCondition] = Nil
+  override def children: Seq[ScanCondition] = Seq()
 
   override def planCost(): Double = rows * rowSize()
 
@@ -709,7 +717,6 @@ case class HashCondition(left : SelectivityPlan,
 
   override val shortName: String = "hashCondition"
   private var optimizedSelectivity: Option[Double] = None
-
 
   override def isValid : Boolean = (selectivity <= 1 && selectivity >= 0) &&
     rows >= 1  &&
