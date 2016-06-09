@@ -60,7 +60,7 @@ abstract class Optimizer extends RuleExecutor[LogicalPlan] {
         ReplaceDistinctWithAggregate) ::
       Batch("Aggregate", FixedPoint(100),
         RemoveLiteralFromGroupExpressions) ::
-      Batch("Operator Optimizations", FixedPoint(100),
+      Batch("Operator Optimizations", FixedPoint(200),
         // Operator push down
         SetOperationPushDown,
         SamplePushDown,
@@ -110,7 +110,7 @@ abstract class Optimizer extends RuleExecutor[LogicalPlan] {
   }
 }
 class MJjoinColumnPrunning extends RuleExecutor[LogicalPlan] {
-  def batches: Seq[Batch] = {Batch("Operator Optimizations", FixedPoint(100),
+  def batches: Seq[Batch] = {Batch("Operator Optimizations", FixedPoint(1000),
     PushPredicateThroughJoin,
     PushPredicateThroughProject,
     ColumnPruning,
